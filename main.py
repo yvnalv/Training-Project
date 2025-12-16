@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, Request
+from fastapi import FastAPI, UploadFile, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -33,6 +33,35 @@ async def predict(file: UploadFile):
         "detections": detections,
         "image": img_b64
     })
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            # Receive image bytes from client
+            data = await websocket.receive_bytes()
+            
+            # Run inference
+            detections, annotated_img_bytes = inference.run_inference(data)
+            
+            # Encode to base64
+            img_b64 = base64.b64encode(annotated_img_bytes).decode('utf-8')
+            
+            # Send results back
+            await websocket.send_json({
+                "detections": detections,
+                "image": img_b64
+            })
+    except WebSocketDisconnect:
+        print("Client disconnected")
+    except Exception as e:
+        print(f"Error: {e}")
+        # Try to close if still open, or just break
+        try:
+            await websocket.close()
+        except:
+            pass
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

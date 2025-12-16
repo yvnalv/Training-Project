@@ -20,6 +20,9 @@
         th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
         th { background: #f8f9fa; }
         #loading { display: none; color: #666; text-align: center; margin: 10px 0; }
+        .camera-section { margin-bottom: 20px; text-align: center; border: 2px solid #eee; padding: 20px; border-radius: 8px; background: #fafafa; }
+        .controls { margin-bottom: 15px; }
+        #streamResult { max-width: 100%; border-radius: 4px; border: 1px solid #ddd; display: none; margin: 0 auto; }
     </style>
 </head>
 <body>
@@ -31,6 +34,22 @@
             <br>
             <button class="btn" onclick="uploadImage()" id="predictBtn">Predict</button>
             <div id="loading">Running inference...</div>
+        </div>
+
+        <div class="camera-section">
+            <h2>Live Camera Stream</h2>
+            <div class="controls">
+                <button class="btn" onclick="startCamera()" id="startBtn">Start Camera</button>
+                <button class="btn" onclick="stopCamera()" id="stopBtn" disabled>Stop Camera</button>
+            </div>
+            <div style="position: relative; min-height: 20px;">
+                <!-- Hidden video source -->
+                <video id="videoElement" width="640" height="480" autoplay playsinline style="display:none"></video>
+                <!-- Canvas for frame capture -->
+                <canvas id="canvasElement" width="640" height="480" style="display:none"></canvas>
+                <!-- Result image stream -->
+                <img id="streamResult" alt="Stream Result">
+            </div>
         </div>
 
         <div id="results" class="results" style="display: none;">
@@ -58,7 +77,6 @@
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             if (!file) return alert("Please select an image first.");
-
             const btn = document.getElementById('predictBtn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
@@ -66,10 +84,8 @@
             btn.disabled = true;
             loading.style.display = 'block';
             results.style.display = 'none';
-
             const formData = new FormData();
             formData.append('file', file);
-
             try {
                 const response = await fetch('/predict', {
                     method: 'POST',
@@ -77,23 +93,13 @@
                 });
                 
                 if (!response.ok) throw new Error('Prediction failed');
-
                 const data = await response.json();
                 
                 // Display Image
                 document.getElementById('resultImage').src = 'data:image/jpeg;base64,' + data.image;
                 
                 // Display Table
-                const tbody = document.getElementById('tableBody');
-                tbody.innerHTML = '';
-                data.detections.forEach(d => {
-                    const row = `<tr>
-                        <td>${d.label}</td>
-                        <td>${(d.confidence * 100).toFixed(1)}%</td>
-                    </tr>`;
-                    tbody.innerHTML += row;
-                });
-
+                updateTable(data.detections);
                 results.style.display = 'flex';
             } catch (err) {
                 alert("Error: " + err.message);
@@ -102,6 +108,98 @@
                 btn.disabled = false;
                 loading.style.display = 'none';
             }
+        }
+
+        // Camera Streaming Logic
+        let videoStream = null;
+        let ws = null;
+        let streamInterval = null;
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                const video = document.getElementById('videoElement');
+                video.srcObject = stream;
+                // Wait for video metadata to load to ensure dimensions are correct
+                await new Promise(resolve => video.onloadedmetadata = resolve);
+                video.play();
+                
+                videoStream = stream;
+                
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('streamResult').style.display = 'block';
+                // Show results section for table
+                document.getElementById('results').style.display = 'flex'; 
+                // Hide static result image if we are streaming, or maybe we reuse it? 
+                // Let's keep stream result separate as per HTML structure above.
+                // But we want to show the table. The table is in #results.
+                
+                // Connect WS
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+                
+                ws.onopen = () => {
+                    console.log("WS Connected");
+                    startStreaming(video);
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    document.getElementById('streamResult').src = 'data:image/jpeg;base64,' + data.image;
+                    updateTable(data.detections);
+                };
+                ws.onclose = () => console.log("WS Closed");
+                ws.onerror = (err) => console.error("WS Error", err);
+            } catch (err) {
+                console.error("Error starting camera:", err);
+                alert("Could not start camera. Make sure you are on HTTPS or localhost.");
+            }
+        }
+
+        function startStreaming(video) {
+            const canvas = document.getElementById('canvasElement');
+            const ctx = canvas.getContext('2d');
+            
+            // Limit to ~10 FPS to avoid overloading
+            streamInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    canvas.toBlob((blob) => {
+                        if (ws.readyState === WebSocket.OPEN) ws.send(blob);
+                    }, 'image/jpeg', 0.7);
+                }
+            }, 100);
+        }
+
+        function stopCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            if (streamInterval) {
+                clearInterval(streamInterval);
+                streamInterval = null;
+            }
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('streamResult').style.display = 'none';
+        }
+
+        function updateTable(detections) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            detections.forEach(d => {
+                const row = `<tr>
+                    <td>${d.label}</td>
+                    <td>${(d.confidence * 100).toFixed(1)}%</td>
+                </tr>`;
+                tbody.innerHTML += row;
+            });
         }
     </script>
 </body>
