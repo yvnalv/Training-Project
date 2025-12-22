@@ -1,24 +1,21 @@
-from fastapi import FastAPI, UploadFile, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, UploadFile, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import uvicorn
-import inference
 import base64
+from . import inference
 
-app = FastAPI()
-
+router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
-@app.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/health")
+@router.get("/health")
 async def health():
     return {"status": "ok", "model": "yolov8n"}
 
-@app.post("/predict")
+@router.post("/predict")
 async def predict(file: UploadFile):
     # Read image bytes
     image_bytes = await file.read()
@@ -34,7 +31,7 @@ async def predict(file: UploadFile):
         "image": img_b64
     })
 
-@app.websocket("/ws")
+@router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
@@ -62,6 +59,3 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close()
         except:
             pass
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
