@@ -6,7 +6,8 @@ let state = {
     rotation: 0,
     flipHorizontal: false,
     confidence: 0.25,
-    isStreaming: false
+    isStreaming: false,
+    cameraMode: 'client' // 'client' | 'server'
 };
 
 // --- Navigation ---
@@ -63,6 +64,15 @@ document.getElementById('resolutionSelect').addEventListener('change', (e) => {
         alert("Restarting camera to apply resolution change...");
         stopCamera();
         setTimeout(startCamera, 500);
+    }
+});
+
+document.getElementById('cameraSourceSelect').addEventListener('change', (e) => {
+    state.cameraMode = e.target.value;
+    if (state.isStreaming) {
+        stopCamera();
+        // Optional: Auto restart? Let's just stop and let user start again to be safe.
+        alert("Camera source changed. Please click Start to resume.");
     }
 });
 
@@ -153,30 +163,17 @@ async function startCamera() {
     try {
         const [width, height] = state.resolution.split('x').map(Number);
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: width, height: height }
-        });
-
-        const video = document.getElementById('videoElement');
-        video.srcObject = stream;
-
-        await new Promise(resolve => video.onloadedmetadata = resolve);
-        video.play();
-
-        videoStream = stream;
-        state.isStreaming = true;
-
-        document.getElementById('startBtn').disabled = true;
-        document.getElementById('stopBtn').disabled = false;
-        document.getElementById('streamResult').style.display = 'block';
-
-        // Connect WS
+        // Connect WS first
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
         ws.onopen = () => {
             console.log("WS Connected");
-            startStreaming(video, width, height);
+            if (state.cameraMode === 'client') {
+                startClientStream(width, height);
+            } else {
+                startServerStream(width, height);
+            }
         };
 
         ws.onmessage = (event) => {
@@ -188,13 +185,48 @@ async function startCamera() {
         ws.onclose = () => console.log("WS Closed");
         ws.onerror = (err) => console.error("WS Error", err);
 
+        state.isStreaming = true;
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        document.getElementById('streamResult').style.display = 'block';
+
     } catch (err) {
         console.error("Error starting camera:", err);
         alert("Could not start camera. Check permissions/HTTPS.");
     }
 }
 
-function startStreaming(video, width, height) {
+async function startClientStream(width, height) {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: width, height: height }
+        });
+
+        const video = document.getElementById('videoElement');
+        video.srcObject = stream;
+
+        await new Promise(resolve => video.onloadedmetadata = resolve);
+        video.play();
+
+        videoStream = stream;
+        startStreamingCanvas(video, width, height);
+    } catch (err) {
+        console.error("Error accessing client camera:", err);
+        alert("Could not access client camera.");
+        stopCamera();
+    }
+}
+
+function startServerStream(width, height) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            action: "start_server_stream",
+            resolution: state.resolution
+        }));
+    }
+}
+
+function startStreamingCanvas(video, width, height) {
     const canvas = document.getElementById('canvasElement');
     const ctx = canvas.getContext('2d');
 
@@ -253,10 +285,18 @@ function startStreaming(video, width, height) {
 }
 
 function stopCamera() {
+    // Client Stop
     if (videoStream) {
         videoStream.getTracks().forEach(track => track.stop());
         videoStream = null;
     }
+
+    // Server Stop
+    if (state.cameraMode === 'server' && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "stop_server_stream" }));
+    }
+
+    // Common Stop
     if (ws) {
         ws.close();
         ws = null;
