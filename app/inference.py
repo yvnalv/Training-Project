@@ -3,7 +3,8 @@ from PIL import Image
 import io
 
 # Load the model (downloads automatically if not found)
-model = YOLO("yolov8n.pt")
+model = YOLO("best.pt")
+# model = YOLO("yolov8n.pt")
 
 def run_inference(image_bytes: bytes):
     """
