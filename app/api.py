@@ -59,6 +59,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Wait for a message with a short timeout
                 data = await asyncio.wait_for(websocket.receive(), timeout=0.05)
                 
+                if data["type"] == "websocket.disconnect":
+                    break
+                
                 if "bytes" in data:
                     # CLIENT MODE: Received image bytes
                     image_bytes = data["bytes"]

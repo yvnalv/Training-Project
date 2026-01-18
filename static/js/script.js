@@ -198,8 +198,31 @@ async function startCamera() {
 
 async function startClientStream(width, height) {
     try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            let errorMsg = "Camera API not available.";
+            if (!window.isSecureContext) {
+                errorMsg += "\n\nCamera access requires HTTPS (Secure Context).";
+                errorMsg += "\nSince you are connecting via HTTP, the browser blocks camera access.";
+                errorMsg += `\n\nTo fix this on Chrome/Edge (Mobile & Desktop):`;
+                errorMsg += `\n1. Go to: chrome://flags/#unsafely-treat-insecure-origin-as-secure`;
+                errorMsg += `\n2. Enable it and add this origin: http://${window.location.host}`;
+                errorMsg += `\n3. Restart the browser.`;
+            }
+            throw new Error(errorMsg);
+        }
+
+        // Default to no mirror for back camera
+        state.flipHorizontal = false;
+        if (document.getElementById('flipHorizontal')) {
+            document.getElementById('flipHorizontal').checked = false;
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: width, height: height }
+            video: {
+                width: width,
+                height: height,
+                facingMode: { ideal: "environment" }
+            }
         });
 
         const video = document.getElementById('videoElement');
@@ -212,7 +235,16 @@ async function startClientStream(width, height) {
         startStreamingCanvas(video, width, height);
     } catch (err) {
         console.error("Error accessing client camera:", err);
-        alert("Could not access client camera.");
+        let userMsg = "Could not access client camera.";
+        if (err.message.includes("requires HTTPS") || err.name === 'NotAllowedError') {
+            userMsg = err.message; // Use our detailed message if it's ours, or standard permission error
+            if (err.name === 'NotAllowedError') {
+                userMsg += "\n\nPlease allow camera permission in your browser settings.";
+            }
+        } else if (err.name === 'NotFoundError') {
+            userMsg = "No camera found on this device.";
+        }
+        alert(userMsg);
         stopCamera();
     }
 }
