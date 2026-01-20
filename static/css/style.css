@@ -419,30 +419,64 @@ td {
     }
 }
 
+/* ===========================
+   Mobile / Small screen navbar
+   =========================== */
 @media (max-width: 768px) {
-    #app {
-        flex-direction: column;
-    }
 
+    /* Sidebar becomes bottom bar */
     .sidebar {
         width: 100%;
-        height: auto;
+        height: 64px;
         flex-direction: row;
-        padding: 1rem;
-        align-items: center;
-        overflow-x: auto;
+        position: fixed;
+        bottom: 0;
+        top: auto;
+        left: 0;
+        z-index: 1000;
+        border-top: 1px solid var(--border);
     }
 
     .nav-links {
+        display: flex;
         flex-direction: row;
+        justify-content: space-evenly;
+        align-items: center;
+        width: 100%;
+        padding: 0;
+        margin: 0;
     }
 
-    .brand span {
+    .nav-links li {
+        flex: 1;
+        justify-content: center;
+        text-align: center;
+        padding: 8px 0;
+        gap: 4px;
+        flex-direction: column;
+    }
+
+    .nav-links li i {
+        font-size: 18px;
+    }
+
+    .nav-links li span {
+        font-size: 11px;
+        line-height: 1;
+    }
+
+    /* hide brand & status on mobile */
+    .brand,
+    .system-status,
+    .sidebar-toggle {
         display: none;
     }
 
-    .system-status {
-        display: none;
+    /* push content above bottom bar */
+    .content {
+        margin-left: 0;
+        margin-top: 0;
+        margin-bottom: 64px;
     }
 }
 
