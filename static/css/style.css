@@ -555,3 +555,31 @@ td {
         flex: 1;
     }
 }
+
+.result-summary{
+  display:flex;
+  gap:12px;
+  margin:12px 0 8px 0;
+}
+
+.summary-item{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  width:100%;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.summary-label{
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.summary-value{
+  font-size: 20px;
+  font-weight: 700;
+}

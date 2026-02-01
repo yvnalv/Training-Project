@@ -120,29 +120,56 @@ async function uploadImage() {
 
     const btn = document.getElementById('predictBtn');
     const loading = document.getElementById('loading');
-    const uploadResults = document.getElementById('uploadResults'); // Container
+    const uploadResults = document.getElementById('uploadResults');
+
+    const resultImage = document.getElementById('resultImage');
+    const tableBody = document.getElementById('tableBody');
 
     btn.disabled = true;
     loading.style.display = 'block';
     uploadResults.style.display = 'none';
 
+    // Clear previous results
+    resultImage.removeAttribute('src');
+    if (tableBody) tableBody.innerHTML = '';
+
+    // Reset count UI (whatever exists)
+    const countSpan =
+        document.getElementById('uploadTotalTubesValue') ||
+        document.getElementById('totalTubesValue');
+    if (countSpan) countSpan.textContent = '0';
+
+    const countText = document.getElementById('totalTubesText');
+    if (countText) countText.innerHTML = 'Total Tubes: <span id="uploadTotalTubesValue">0</span>';
+
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-        const response = await fetch('/predict', {
-            method: 'POST',
-            body: formData
-        });
-
+        const response = await fetch('/predict', { method: 'POST', body: formData });
         if (!response.ok) throw new Error('Prediction failed');
+
         const data = await response.json();
 
-        // Display Image
-        document.getElementById('resultImage').src = 'data:image/jpeg;base64,' + data.image;
+        // ✅ annotated image
+        resultImage.src = 'data:image/jpeg;base64,' + data.image;
 
-        // Display Table
-        updateTable(data.detections, 'tableBody');
+        // ✅ tube count (prefer API value; fallback to detections length)
+        const totalCount = (data.total_tubes ?? (data.detections ? data.detections.length : 0));
+
+        // ✅ update span if present
+        const spanEl =
+            document.getElementById('uploadTotalTubesValue') ||
+            document.getElementById('totalTubesValue');
+        if (spanEl) spanEl.textContent = String(totalCount);
+
+        // ✅ update full text line if present
+        const textEl = document.getElementById('totalTubesText');
+        if (textEl) textEl.innerHTML = `Total Tubes: <span id="uploadTotalTubesValue">${totalCount}</span>`;
+
+        // ✅ table
+        updateTable(data.detections || [], 'tableBody');
+
         uploadResults.style.display = 'block';
     } catch (err) {
         alert("Error: " + err.message);
@@ -348,7 +375,18 @@ function updateTable(detections, tableId) {
 
     tbody.innerHTML = '';
 
-    // Limit to top 5 to avoid UI lag on RPi
+    if (!detections || detections.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td colspan="2" style="text-align:center; opacity:0.6;">
+                No objects detected
+            </td>
+        `;
+        tbody.appendChild(row);
+        return;
+    }
+
+    // Limit to top 5 to avoid UI lag on Raspberry Pi
     detections.slice(0, 5).forEach(d => {
         const row = document.createElement('tr');
         row.innerHTML = `
@@ -358,3 +396,4 @@ function updateTable(detections, tableId) {
         tbody.appendChild(row);
     });
 }
+

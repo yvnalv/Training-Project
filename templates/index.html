@@ -68,12 +68,13 @@
                     </div>
                 </div>
             </section>
-
+            
             <!-- UPLOAD VIEW -->
             <section id="upload-view" class="view">
                 <header class="view-header">
                     <h1>Image Analysis</h1>
                 </header>
+
                 <div class="workspace">
                     <div class="panel control-panel">
                         <div class="upload-zone" id="dropZone">
@@ -81,29 +82,41 @@
                             <p>Drag & drop or click to upload</p>
                             <input type="file" id="fileInput" accept="image/*" hidden>
                         </div>
+
                         <button class="btn primary" id="predictBtn" onclick="uploadImage()">
                             <i class="fa-solid fa-bolt"></i> Analyze
                         </button>
-                    </div>
-                    <div class="panel display-panel">
+                        </div>
+
+                        <div class="panel display-panel">
                         <div id="loading" class="loader" style="display:none;">Analyzing...</div>
+
                         <div class="result-container" id="uploadResults" style="display:none;">
                             <img id="resultImage" alt="Result">
+
+                            <!-- NEW: summary row -->
+                            <div class="result-summary">
+                                <div class="summary-item" id="totalTubesText">Total Tubes: <span id="uploadTotalTubesValue">0</span></div>
+                            </div>
+
+
+
                             <div class="table-wrapper">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Object</th>
-                                            <th>Conf</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="tableBody"></tbody>
-                                </table>
+                            <table>
+                                <thead>
+                                <tr>
+                                    <th>Object</th>
+                                    <th>Conf</th>
+                                </tr>
+                                </thead>
+                                <tbody id="tableBody"></tbody>
+                            </table>
                             </div>
                         </div>
                     </div>
                 </div>
             </section>
+
 
             <!-- STREAM VIEW -->
             <section id="stream-view" class="view">

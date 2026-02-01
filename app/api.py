@@ -21,13 +21,15 @@ async def predict(file: UploadFile):
     image_bytes = await file.read()
     
     # Run inference
-    detections, annotated_img_bytes = inference.run_inference(image_bytes)
+    # detections, annotated_img_bytes = inference.run_inference(image_bytes)
+    detections, total_count, annotated_img_bytes = inference.run_inference_with_count(image_bytes)
     
     # Encode image to base64 for easy frontend display
     img_b64 = base64.b64encode(annotated_img_bytes).decode('utf-8')
     
     return JSONResponse(content={
         "detections": detections,
+        "total_tubes": total_count,
         "image": img_b64
     })
 
