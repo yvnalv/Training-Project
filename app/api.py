@@ -3,6 +3,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 import base64
 from . import inference
+from .mpn.mpn_lookup import lookup_mpn
+from .inference import detections_to_tubes, tubes_to_xyz
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -21,17 +23,30 @@ async def predict(file: UploadFile):
     image_bytes = await file.read()
     
     # Run inference
-    # detections, annotated_img_bytes = inference.run_inference(image_bytes)
     detections, total_count, annotated_img_bytes = inference.run_inference_with_count(image_bytes)
     
     # Encode image to base64 for easy frontend display
     img_b64 = base64.b64encode(annotated_img_bytes).decode('utf-8')
-    
+
+    # --- MPN integration (NEW) ---
+    from .inference import detections_to_tubes, tubes_to_xyz
+    from .mpn.mpn_lookup import lookup_mpn
+
+    tubes = detections_to_tubes(detections)   # [0,1,0,1,...] length = 9
+    x, y, z = tubes_to_xyz(tubes)              # positives per dilution
+    mpn_result = lookup_mpn(x, y, z)            # lookup from CSV
+
     return JSONResponse(content={
         "detections": detections,
         "total_tubes": total_count,
+        "tubes": tubes,                 # e.g. [1,0,1, 0,1,0, 0,0,1]
+        "pattern": mpn_result["pattern"],# e.g. P101
+        "mpn": mpn_result["mpn"],        # MPN/g
+        "ci_low": mpn_result["low"],     # 95% CI low
+        "ci_high": mpn_result["high"],   # 95% CI high
         "image": img_b64
     })
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

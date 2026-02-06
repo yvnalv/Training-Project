@@ -94,12 +94,21 @@
                         <div class="result-container" id="uploadResults" style="display:none;">
                             <img id="resultImage" alt="Result">
 
-                            <!-- NEW: summary row -->
+                            <!-- MPN RESULT -->
                             <div class="result-summary">
-                                <div class="summary-item" id="totalTubesText">Total Tubes: <span id="uploadTotalTubesValue">0</span></div>
+                                <div class="summary-item">
+                                    <strong>MPN Result</strong>
+                                </div>
+                                <div class="summary-item">
+                                    Pattern: <span id="mpnPattern">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    MPN / g: <span id="mpnValue">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    95% CI: <span id="mpnCI">-</span>
+                                </div>
                             </div>
-
-
 
                             <div class="table-wrapper">
                             <table>
@@ -107,6 +116,7 @@
                                 <tr>
                                     <th>Object</th>
                                     <th>Conf</th>
+                                    <th>Value</th>
                                 </tr>
                                 </thead>
                                 <tbody id="tableBody"></tbody>

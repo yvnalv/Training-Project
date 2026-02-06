@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from . import api
+from .mpn.mpn_lookup import load_mpn_table
 
 app = FastAPI()
+
+# Load MPN table once at startup
+load_mpn_table()
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")

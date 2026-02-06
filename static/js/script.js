@@ -170,6 +170,17 @@ async function uploadImage() {
         // ✅ table
         updateTable(data.detections || [], 'tableBody');
 
+        // --- MPN UI update ---
+        document.getElementById('mpnPattern').textContent = data.pattern || '-';
+        document.getElementById('mpnValue').textContent = data.mpn || '-';
+
+        if (data.ci_low && data.ci_high) {
+            document.getElementById('mpnCI').textContent =
+                `${data.ci_low} – ${data.ci_high}`;
+        } else {
+            document.getElementById('mpnCI').textContent = '-';
+        }
+
         uploadResults.style.display = 'block';
     } catch (err) {
         alert("Error: " + err.message);
@@ -378,22 +389,37 @@ function updateTable(detections, tableId) {
     if (!detections || detections.length === 0) {
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td colspan="2" style="text-align:center; opacity:0.6;">
-                No objects detected
+            <td colspan="3" style="text-align:center; opacity:0.6;">
+                No tubes detected
             </td>
         `;
         tbody.appendChild(row);
         return;
     }
 
-    // Limit to top 5 to avoid UI lag on Raspberry Pi
-    detections.slice(0, 5).forEach(d => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${d.label}</td>
-            <td>${(d.confidence * 100).toFixed(1)}%</td>
-        `;
-        tbody.appendChild(row);
-    });
+    // Limit to top 10 to avoid UI lag on Raspberry Pi
+    // Sort detections LEFT → RIGHT using bbox[0] (x1)
+    detections
+        .slice() // clone, do not mutate original
+        .sort((a, b) => {
+            if (Array.isArray(a.bbox) && Array.isArray(b.bbox)) {
+                return a.bbox[0] - b.bbox[0]; // x1 comparison
+            }
+            return 0;
+        })
+        .slice(0, 9) // keep existing limit
+        .forEach(d => {
+            const value = d.label === 'Yellow_NoBubble' ? 1 : 0;
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${d.label}</td>
+                <td>${(d.confidence * 100).toFixed(1)}%</td>
+                <td>${value}</td>
+            `;
+            tbody.appendChild(row);
+        });
+        console.log(detections.map(d => d.bbox[0]));
+
 }
 
