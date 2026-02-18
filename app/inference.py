@@ -114,18 +114,27 @@ def run_inference_with_count(image_bytes: bytes):
     """
     Returns:
       detections (list)
-      total_count (int)  # EXACT number of predicted boxes
+      total_count (int)
       annotated_image_bytes (bytes)
     """
+
+    # ---- Load image ----
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-    results = model(image,conf=0.4, iou=0.6, agnostic_nms=True)
-    
+    # ---- Downscale (50%) ----
+    scale_factor = 0.2
+    new_w = int(image.width * scale_factor)
+    new_h = int(image.height * scale_factor)
+
+    image = image.resize((new_w, new_h), Image.LANCZOS)
+
+    # ---- Run YOLO ----
+    results = model(image, conf=0.4, iou=0.6, agnostic_nms=True)
     result = results[0]
 
     boxes = result.boxes
-
     detections = []
+
     if boxes is not None and len(boxes) > 0:
         for b in boxes:
             detections.append({
@@ -134,30 +143,112 @@ def run_inference_with_count(image_bytes: bytes):
                 "bbox": b.xyxy.tolist()[0]
             })
 
-    # ✅ NEW: suppress duplicate tubes
+    # Remove duplicate tubes
     detections = suppress_duplicate_tubes(detections)
-
-    # ✅ NEW: source of truth AFTER de-duplication
     total_count = len(detections)
 
-    # Annotated image from YOLO
-    im_array = result.plot()                 # BGR numpy array
-    im = Image.fromarray(im_array[..., ::-1])  # RGB PIL
-
-    # Overlay count text
+    # ---- Drawing Setup ----
+    im = image.copy()
     draw = ImageDraw.Draw(im)
-    text = f"Total Tubes: {total_count}"
+
+    img_width, img_height = im.size
+
+    # Proportional thickness
+    box_thickness = max(3, img_width // 220)
+
+    # Estimate tube height
+    if detections:
+        sample_box = detections[0]["bbox"]
+        tube_height = int(sample_box[3] - sample_box[1])
+    else:
+        tube_height = img_height // 4
+
+    # Proportional font
+    font_size = int(tube_height * 0.30)
+    font_size = max(60, font_size)
 
     try:
-        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+        font = ImageFont.truetype(
+            "fonts/DejaVuSans-Bold.ttf",
+            font_size
+        )
     except:
         font = ImageFont.load_default()
 
-    x, y = 10, 10
-    text_bbox = draw.textbbox((x, y), text, font=font)
-    draw.rectangle(text_bbox, fill=(0, 0, 0))
-    draw.text((x, y), text, fill=(255, 255, 255), font=font)
+    padding = font_size // 4
 
+    # ---- Draw Detections ----
+    for det in detections:
+        x1, y1, x2, y2 = map(int, det["bbox"])
+
+        if det["label"] == "Yellow_NoBubble":
+            label_text = "1"
+            color = (0, 180, 0)
+        else:
+            label_text = "0"
+            color = (120, 120, 120)
+
+        # Draw box
+        draw.rectangle([x1, y1, x2, y2],
+                       outline=color,
+                       width=box_thickness)
+
+        # Text size
+        text_bbox = draw.textbbox((0, 0), label_text, font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+        text_h = text_bbox[3] - text_bbox[1]
+
+        # Position top-left inside box
+        text_x = x1 + padding
+        text_y = y1 + padding
+
+        # Background
+        draw.rectangle(
+            [
+                text_x - padding,
+                text_y - padding,
+                text_x + text_w + padding,
+                text_y + text_h + padding
+            ],
+            fill=color
+        )
+
+        # Text
+        draw.text((text_x, text_y),
+                  label_text,
+                  fill=(255, 255, 255),
+                  font=font)
+
+    # ---- Draw Total Tubes (Bottom Right of Image) ----
+    count_text = f"Total Tubes: {total_count}"
+
+    count_bbox = draw.textbbox((0, 0), count_text, font=font)
+    count_w = count_bbox[2] - count_bbox[0]
+    count_h = count_bbox[3] - count_bbox[1]
+
+    margin = 30
+
+    count_x = img_width - count_w - padding*2 - margin
+    count_y = img_height - count_h - padding*2 - margin
+
+    draw.rectangle(
+        [
+            count_x,
+            count_y,
+            count_x + count_w + padding*2,
+            count_y + count_h + padding*2
+        ],
+        fill=(0, 0, 0)
+    )
+
+    draw.text(
+        (count_x + padding, count_y + padding),
+        count_text,
+        fill=(255, 255, 255),
+        font=font
+    )
+
+    # ---- Convert to JPEG ----
     buf = io.BytesIO()
     im.save(buf, format="JPEG")
 
