@@ -82,7 +82,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "bytes" in data:
                     # CLIENT MODE: Received image bytes
                     image_bytes = data["bytes"]
-                    detections, annotated_img_bytes = inference.run_inference(image_bytes)
+                    detections, annotated_img_bytes = inference.run_inference_with_count(image_bytes)
                     img_b64 = base64.b64encode(annotated_img_bytes).decode('utf-8')
                     await websocket.send_json({
                         "mode": "client",
@@ -112,7 +112,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         success, encoded_img = cv2.imencode('.jpg', frame)
                         if success:
                             image_bytes = encoded_img.tobytes()
-                            detections, annotated_img_bytes = inference.run_inference(image_bytes)
+                            detections, annotated_img_bytes = inference.run_inference_with_count(image_bytes)
                             img_b64 = base64.b64encode(annotated_img_bytes).decode('utf-8')
                             
                             await websocket.send_json({
