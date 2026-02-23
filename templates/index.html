@@ -1,276 +1,269 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VialVision</title>
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- CSS -->
-    <link rel="stylesheet" href="/static/css/style.css?v=3">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VialVision</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=4">
 </head>
-
 <body>
-    <div id="app">
+<div id="app">
 
-        <!-- Sidebar Navigation -->
-        <nav class="sidebar">
-            <div class="brand">
-                <i class="fa-solid fa-eye"></i>
-                <span>VialVision</span>
-            </div>
-            <ul class="nav-links">
-                <!-- FIX: added data-view attributes to all nav items so navigateTo()
-                     can use dataset.view instead of parsing the onclick string -->
-                <li class="active" data-view="home" onclick="navigateTo('home')">
-                    <i class="fa-solid fa-house"></i>
-                    <span>Home</span>
-                </li>
-                <li data-view="upload" onclick="navigateTo('upload')">
-                    <i class="fa-solid fa-upload"></i>
-                    <span>Upload</span>
-                </li>
-                <li data-view="stream" onclick="navigateTo('stream')">
-                    <i class="fa-solid fa-video"></i>
-                    <span>Live Stream</span>
-                </li>
-                <li data-view="settings" onclick="navigateTo('settings')">
-                    <i class="fa-solid fa-gear"></i>
-                    <span>Settings</span>
-                </li>
-            </ul>
-            <div class="system-status">
-                <small>System: Online</small>
-            </div>
-        </nav>
-
-        <!-- Main Content Area -->
-        <main class="content">
-
-            <!-- HOME VIEW -->
-            <section id="home-view" class="view active">
-                <header class="view-header">
-                    <h1>Dashboard</h1>
-                    <p>Select a mode to begin detection</p>
-                </header>
-                <div class="cards-container">
-                    <div class="card action-card" onclick="navigateTo('upload')">
-                        <div class="card-icon"><i class="fa-solid fa-image"></i></div>
-                        <h2>Image Analysis</h2>
-                        <p>Upload static images for high-precision detection.</p>
-                    </div>
-                    <div class="card action-card" onclick="navigateTo('stream')">
-                        <div class="card-icon"><i class="fa-solid fa-video"></i></div>
-                        <h2>Live Stream</h2>
-                        <p>Real-time detection from camera feed (Optimized for RPi).</p>
-                    </div>
-                </div>
-            </section>
-
-            <!-- UPLOAD VIEW -->
-            <section id="upload-view" class="view">
-                <header class="view-header">
-                    <h1>Image Analysis</h1>
-                </header>
-
-                <div class="workspace">
-                    <div class="panel control-panel">
-                        <div class="upload-zone" id="dropZone">
-                            <i class="fa-solid fa-cloud-arrow-up"></i>
-                            <p>Drag & drop or click to upload</p>
-                            <input type="file" id="fileInput" accept="image/*" hidden>
-                        </div>
-                        <button class="btn primary" id="predictBtn" onclick="uploadImage()">
-                            <i class="fa-solid fa-bolt"></i> Analyze
-                        </button>
-                    </div>
-
-                    <div class="panel display-panel">
-                        <div id="loading" class="loader" style="display:none;">Analyzing...</div>
-
-                        <div class="result-container" id="uploadResults" style="display:none;">
-                            <img id="resultImage" alt="Result">
-
-                            <!-- MPN Result -->
-                            <div class="result-summary">
-                                <div class="summary-item">
-                                    <strong>MPN Result</strong>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="summary-label">Pattern</span>
-                                    <span class="summary-value" id="mpnPattern">-</span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="summary-label">MPN / g</span>
-                                    <span class="summary-value" id="mpnValue">-</span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="summary-label">95% CI</span>
-                                    <span class="summary-value" id="mpnCI">-</span>
-                                </div>
-                            </div>
-
-                            <div class="table-wrapper">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Object</th>
-                                            <th>Conf</th>
-                                            <th>Value</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="tableBody"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- STREAM VIEW -->
-            <section id="stream-view" class="view">
-                <header class="view-header">
-                    <h1>Live Stream</h1>
-                    <div class="header-controls">
-                        <button class="btn success" id="startBtn" onclick="startCamera()">
-                            <i class="fa-solid fa-play"></i> Start
-                        </button>
-                        <button class="btn danger" id="stopBtn" onclick="stopCamera()" disabled>
-                            <i class="fa-solid fa-stop"></i> Stop
-                        </button>
-                    </div>
-                </header>
-
-                <div class="workspace stream-workspace">
-                    <div class="video-container">
-                        <!-- Hidden source video -->
-                        <video id="videoElement" playsinline style="display:none;"></video>
-                        <!-- Canvas for processing/sending -->
-                        <canvas id="canvasElement" style="display:none;"></canvas>
-                        <!-- Annotated result from server -->
-                        <img id="streamResult" alt="Live Feed">
-                    </div>
-
-                    <!-- FIX: MPN summary added to stream view — the server was already
-                         sending pattern/mpn/ci_low/ci_high over the WebSocket but the
-                         UI had no elements to display them. IDs match what script.js
-                         now passes to updateMpnDisplay(). -->
-                    <div class="result-summary">
-                        <div class="summary-item">
-                            <strong>MPN Result</strong>
-                        </div>
-                        <div class="summary-item">
-                            <span class="summary-label">Pattern</span>
-                            <span class="summary-value" id="streamMpnPattern">-</span>
-                        </div>
-                        <div class="summary-item">
-                            <span class="summary-label">MPN / g</span>
-                            <span class="summary-value" id="streamMpnValue">-</span>
-                        </div>
-                        <div class="summary-item">
-                            <span class="summary-label">95% CI</span>
-                            <span class="summary-value" id="streamMpnCI">-</span>
-                        </div>
-                    </div>
-
-                    <div class="stats-panel">
-                        <h3>Detections</h3>
-                        <div class="table-wrapper">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Object</th>
-                                        <th>Conf</th>
-                                        <!-- FIX: "Value" column was missing from stream table
-                                             but updateTable() always renders three columns,
-                                             causing a misaligned layout -->
-                                        <th>Value</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="streamTableBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- SETTINGS VIEW -->
-            <section id="settings-view" class="view">
-                <header class="view-header">
-                    <h1>Settings</h1>
-                </header>
-                <div class="settings-container">
-
-                    <!-- Performance Group -->
-                    <div class="settings-group">
-                        <h3><i class="fa-solid fa-gauge-high"></i> Performance & Source</h3>
-                        <div class="setting-item">
-                            <label>Camera Source</label>
-                            <select id="cameraSourceSelect">
-                                <option value="client" selected>Client (Laptop/Webcam)</option>
-                                <option value="server">Server (Raspberry Pi/USB)</option>
-                            </select>
-                        </div>
-                        <div class="setting-item">
-                            <label>Max FPS (Upload Limit)</label>
-                            <input type="range" id="fpsRange" min="1" max="30" value="5"
-                                oninput="updateFpsDisplay(this.value)">
-                            <span id="fpsValue">5 FPS</span>
-                            <small>Lower FPS reduces RPi CPU load.</small>
-                        </div>
-                        <div class="setting-item">
-                            <label>Resolution</label>
-                            <select id="resolutionSelect">
-                                <option value="320x240">Low (320x240) - Fast</option>
-                                <option value="640x480" selected>Medium (640x480) - Balanced</option>
-                                <option value="1280x720">High (1280x720) - Slow</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Camera Group -->
-                    <div class="settings-group">
-                        <h3><i class="fa-solid fa-camera-rotate"></i> Camera Correction</h3>
-                        <div class="setting-item">
-                            <label>Rotation</label>
-                            <div class="btn-group">
-                                <button class="btn sm" onclick="setRotation(0)">0°</button>
-                                <button class="btn sm" onclick="setRotation(90)">90°</button>
-                                <button class="btn sm" onclick="setRotation(180)">180°</button>
-                                <button class="btn sm" onclick="setRotation(270)">270°</button>
-                            </div>
-                            <span id="currentRotation">0°</span>
-                        </div>
-                        <div class="setting-item checkbox">
-                            <label>
-                                <input type="checkbox" id="flipHorizontal"> Flip Horizontal (Mirror)
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Model Group -->
-                    <div class="settings-group">
-                        <h3><i class="fa-solid fa-brain"></i> Model</h3>
-                        <div class="setting-item">
-                            <label>Confidence Threshold</label>
-                            <input type="range" id="confRange" min="0.1" max="1.0" step="0.05" value="0.25"
-                                oninput="updateConfDisplay(this.value)">
-                            <span id="confValue">0.25</span>
-                        </div>
-                    </div>
-
-                </div>
-            </section>
-
-        </main>
+  <!-- ── Sidebar / Bottom Nav ──────────────────────────── -->
+  <nav class="sidebar">
+    <div class="brand">
+      <i class="fa-solid fa-eye"></i>
+      <span>VialVision</span>
     </div>
+    <ul class="nav-links">
+      <li class="active" data-view="home" onclick="navigateTo('home')">
+        <i class="fa-solid fa-house"></i>
+        <span>Home</span>
+      </li>
+      <li data-view="upload" onclick="navigateTo('upload')">
+        <i class="fa-solid fa-upload"></i>
+        <span>Upload</span>
+      </li>
+      <li data-view="stream" onclick="navigateTo('stream')">
+        <i class="fa-solid fa-video"></i>
+        <span>Stream</span>
+      </li>
+      <li data-view="settings" onclick="navigateTo('settings')">
+        <i class="fa-solid fa-gear"></i>
+        <span>Settings</span>
+      </li>
+    </ul>
+    <div class="system-status">
+      <small>System: Online</small>
+    </div>
+  </nav>
 
-    <script src="/static/js/script.js?v=3"></script>
+  <!-- ── Main Content ──────────────────────────────────── -->
+  <main class="content">
+
+    <!-- HOME VIEW -->
+    <section id="home-view" class="view active">
+      <header class="view-header">
+        <div class="view-header-left">
+          <h1>Dashboard</h1>
+          <p>Select a mode to begin detection</p>
+        </div>
+      </header>
+      <div class="cards-container">
+        <div class="card action-card" onclick="navigateTo('upload')">
+          <div class="card-icon"><i class="fa-solid fa-image"></i></div>
+          <h2>Image Analysis</h2>
+          <p>Upload static images for high-precision MPN detection.</p>
+        </div>
+        <div class="card action-card" onclick="navigateTo('stream')">
+          <div class="card-icon"><i class="fa-solid fa-video"></i></div>
+          <h2>Live Stream</h2>
+          <p>Real-time detection from camera feed, optimised for RPi.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- UPLOAD VIEW -->
+    <section id="upload-view" class="view">
+      <header class="view-header">
+        <div class="view-header-left">
+          <h1>Image Analysis</h1>
+          <p>Upload a photo of the 9-tube rack to get an MPN result</p>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <!-- Left: controls -->
+        <div class="panel control-panel">
+          <div class="upload-zone" id="dropZone">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+            <p>Drag &amp; drop or click to upload</p>
+            <input type="file" id="fileInput" accept="image/*" hidden>
+          </div>
+          <button class="btn primary" id="predictBtn" onclick="uploadImage()">
+            <i class="fa-solid fa-bolt"></i> Analyze
+          </button>
+        </div>
+
+        <!-- Right: results -->
+        <div class="panel display-panel">
+          <div id="loading" class="loader" style="display:none;">Analyzing…</div>
+
+          <div class="result-container" id="uploadResults" style="display:none;">
+            <img id="resultImage" alt="Annotated result">
+
+            <!-- MPN summary -->
+            <div class="result-summary">
+              <div class="summary-item">
+                <strong>MPN</strong>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">Pattern</span>
+                <span class="summary-value" id="mpnPattern">–</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">MPN / g</span>
+                <span class="summary-value" id="mpnValue">–</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">95% CI</span>
+                <span class="summary-value" id="mpnCI">–</span>
+              </div>
+            </div>
+
+            <!-- Detection table -->
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Object</th>
+                    <th>Conf</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STREAM VIEW -->
+    <section id="stream-view" class="view">
+      <header class="view-header">
+        <div class="view-header-left">
+          <h1>Live Stream</h1>
+          <p>Real-time tube detection via camera</p>
+        </div>
+        <div class="header-controls">
+          <button class="btn success" id="startBtn" onclick="startCamera()">
+            <i class="fa-solid fa-play"></i> Start
+          </button>
+          <button class="btn danger" id="stopBtn" onclick="stopCamera()" disabled>
+            <i class="fa-solid fa-stop"></i> Stop
+          </button>
+        </div>
+      </header>
+
+      <div class="workspace stream-workspace">
+        <!-- Video -->
+        <div class="video-container">
+          <video id="videoElement" playsinline style="display:none;"></video>
+          <canvas id="canvasElement" style="display:none;"></canvas>
+          <img id="streamResult" alt="Live feed">
+        </div>
+
+        <!-- MPN live result -->
+        <div class="result-summary">
+          <div class="summary-item">
+            <strong>MPN</strong>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Pattern</span>
+            <span class="summary-value" id="streamMpnPattern">–</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">MPN / g</span>
+            <span class="summary-value" id="streamMpnValue">–</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">95% CI</span>
+            <span class="summary-value" id="streamMpnCI">–</span>
+          </div>
+        </div>
+
+        <!-- Detection table (hidden on RPi via CSS) -->
+        <div class="stats-panel">
+          <h3>Detections</h3>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Object</th>
+                  <th>Conf</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody id="streamTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS VIEW -->
+    <section id="settings-view" class="view">
+      <header class="view-header">
+        <div class="view-header-left">
+          <h1>Settings</h1>
+          <p>Configure camera, performance, and model parameters</p>
+        </div>
+      </header>
+      <div class="settings-container">
+
+        <!-- Performance & Source -->
+        <div class="settings-group">
+          <h3><i class="fa-solid fa-gauge-high"></i> Performance &amp; Source</h3>
+          <div class="setting-item">
+            <label>Camera Source</label>
+            <select id="cameraSourceSelect">
+              <option value="client" selected>Client (Laptop / Webcam)</option>
+              <option value="server">Server (Raspberry Pi / USB)</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <label>Max FPS — <span id="fpsValue">5 FPS</span></label>
+            <input type="range" id="fpsRange" min="1" max="30" value="5"
+                   oninput="updateFpsDisplay(this.value)">
+            <small>Lower FPS reduces RPi CPU load.</small>
+          </div>
+          <div class="setting-item">
+            <label>Resolution</label>
+            <select id="resolutionSelect">
+              <option value="320x240">Low (320×240) – Fast</option>
+              <option value="640x480" selected>Medium (640×480) – Balanced</option>
+              <option value="1280x720">High (1280×720) – Slow</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Camera Correction -->
+        <div class="settings-group">
+          <h3><i class="fa-solid fa-camera-rotate"></i> Camera Correction</h3>
+          <div class="setting-item">
+            <label>Rotation — <span id="currentRotation">0°</span></label>
+            <div class="btn-group">
+              <button class="btn sm" onclick="setRotation(0)">0°</button>
+              <button class="btn sm" onclick="setRotation(90)">90°</button>
+              <button class="btn sm" onclick="setRotation(180)">180°</button>
+              <button class="btn sm" onclick="setRotation(270)">270°</button>
+            </div>
+          </div>
+          <div class="setting-item checkbox">
+            <label>
+              <input type="checkbox" id="flipHorizontal">
+              Flip Horizontal (Mirror)
+            </label>
+          </div>
+        </div>
+
+        <!-- Model -->
+        <div class="settings-group">
+          <h3><i class="fa-solid fa-brain"></i> Model</h3>
+          <div class="setting-item">
+            <label>Confidence Threshold — <span id="confValue">0.25</span></label>
+            <input type="range" id="confRange" min="0.1" max="1.0" step="0.05" value="0.25"
+                   oninput="updateConfDisplay(this.value)">
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+</div>
+<script src="/static/js/script.js?v=4"></script>
 </body>
-
 </html>
