@@ -122,7 +122,7 @@ def run_inference_with_count(image_bytes: bytes):
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
     # ---- Downscale (50%) ----
-    scale_factor = 0.2
+    scale_factor = 0.5
     new_w = int(image.width * scale_factor)
     new_h = int(image.height * scale_factor)
 

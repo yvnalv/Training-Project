@@ -583,3 +583,23 @@ td {
   font-size: 20px;
   font-weight: 700;
 }
+
+/* ===========================
+   Mobile fix for MPN summary
+   =========================== */
+@media (max-width: 768px) {
+
+  .result-summary{
+    flex-direction: column;
+    gap:8px;
+  }
+
+  .summary-item{
+    padding:8px 10px;
+  }
+
+  .summary-value{
+    font-size:16px;
+  }
+
+}

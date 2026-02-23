@@ -40,12 +40,19 @@ def lookup_mpn(x: int, y: int, z: int):
         z: positives at 0.001 g (0–3)
 
     Returns:
-        dict: { mpn, low, high }
+        dict: { pattern, mpn, low, high }
     """
+
     key = f"P{x}{y}{z}"
 
     if key not in _MPN_TABLE:
-        raise ValueError(f"MPN pattern {key} not found in table")
+        # Instead of crashing system, return safe fallback
+        return {
+            "pattern": key,
+            "mpn": None,
+            "low": None,
+            "high": None,
+        }
 
     return {
         "pattern": key,
