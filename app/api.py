@@ -1,186 +1,216 @@
-from fastapi import APIRouter, UploadFile, Request, WebSocket, WebSocketDisconnect
+import asyncio
+import base64
+import json
+import logging
+
+import cv2
+import numpy as np
+from fastapi import APIRouter, UploadFile, Form, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-import base64
+
 from . import inference
-from .mpn.mpn_lookup import lookup_mpn
+from .camera import Camera
 from .inference import detections_to_tubes, tubes_to_xyz
+from .mpn.mpn_lookup import lookup_mpn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
+
+
+# ---------------------------------------------------------------------------
+# Helper: MPN calculation (extracted to eliminate copy-paste in WS handler)
+# ---------------------------------------------------------------------------
+
+def _compute_mpn(detections: list, total_count: int) -> dict:
+    """
+    Given a list of detections and the tube count, return a dict of MPN fields.
+    If total_count != 9, all MPN fields are returned as None so the caller can
+    still send a well-formed response without crashing.
+    """
+    if total_count != 9:
+        return {
+            "tubes": [],
+            "pattern": None,
+            "mpn": None,
+            "ci_low": None,
+            "ci_high": None,
+        }
+
+    tubes = detections_to_tubes(detections)  # safe: we checked count == 9
+    x, y, z = tubes_to_xyz(tubes)
+    result = lookup_mpn(x, y, z)
+
+    return {
+        "tubes": tubes,
+        "pattern": result["pattern"],
+        "mpn": result["mpn"],
+        "ci_low": result["low"],
+        "ci_high": result["high"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# REST endpoints
+# ---------------------------------------------------------------------------
 
 @router.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+
 @router.get("/health")
 async def health():
     return {"status": "ok", "model": "yolov8n"}
 
-@router.post("/predict")
-async def predict(file: UploadFile):
-    # Read image bytes
-    image_bytes = await file.read()
-    
-    # Run inference
-    detections, total_count, annotated_img_bytes = inference.run_inference_with_count(image_bytes)
-    
-    # Encode image to base64 for easy frontend display
-    img_b64 = base64.b64encode(annotated_img_bytes).decode('utf-8')
 
-    tubes = detections_to_tubes(detections)   # [0,1,0,1,...] length = 9
-    x, y, z = tubes_to_xyz(tubes)              # positives per dilution
-    mpn_result = lookup_mpn(x, y, z)            # lookup from CSV
+@router.post("/predict")
+async def predict(
+    file: UploadFile,
+    conf: float = Form(default=0.4),  # FIX: accept confidence from frontend form data
+):
+    image_bytes = await file.read()
+
+    detections, total_count, annotated_img_bytes = inference.run_inference_with_count(
+        image_bytes, conf=conf  # FIX: pass through instead of using hardcoded 0.4
+    )
+
+    if total_count != 9:
+        logger.warning(
+            "/predict: expected 9 tubes, got %d. Returning result without MPN.",
+            total_count,
+        )
+
+    img_b64 = base64.b64encode(annotated_img_bytes).decode("utf-8")
+    mpn = _compute_mpn(detections, total_count)
 
     return JSONResponse(content={
         "detections": detections,
         "total_tubes": total_count,
-        "tubes": tubes,                 # e.g. [1,0,1, 0,1,0, 0,0,1]
-        "pattern": mpn_result["pattern"],# e.g. P101
-        "mpn": mpn_result["mpn"],        # MPN/g
-        "ci_low": mpn_result["low"],     # 95% CI low
-        "ci_high": mpn_result["high"],   # 95% CI high
-        "image": img_b64
+        "tubes": mpn["tubes"],
+        "pattern": mpn["pattern"],
+        "mpn": mpn["mpn"],
+        "ci_low": mpn["ci_low"],
+        "ci_high": mpn["ci_high"],
+        "image": img_b64,
     })
 
+
+# ---------------------------------------------------------------------------
+# WebSocket endpoint
+# ---------------------------------------------------------------------------
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    
-    from .camera import Camera
-    import asyncio
-    import cv2
-    import numpy as np
-    from .inference import detections_to_tubes, tubes_to_xyz
-    from .mpn.mpn_lookup import lookup_mpn
-
     camera = Camera()
-    
+
+    # Per-session confidence — updated by the frontend set_conf message
+    session_conf: float = 0.4
+
     try:
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive(), timeout=0.05)
-                
+
                 if data["type"] == "websocket.disconnect":
                     break
-                
-                # -------------------------
-                # CLIENT MODE
-                # -------------------------
+
+                # ---------------------------------------------------------
+                # CLIENT MODE — browser sends raw camera frames
+                # ---------------------------------------------------------
                 if "bytes" in data:
                     image_bytes = data["bytes"]
-
                     detections, total_count, annotated_img_bytes = \
-                        inference.run_inference_with_count(image_bytes)
+                        inference.run_inference_with_count(image_bytes, conf=session_conf)
 
-                    img_b64 = base64.b64encode(
-                        annotated_img_bytes
-                    ).decode('utf-8')
-
-                    # ---- MPN Integration ----
-                    tubes = []
-                    pattern = None
-                    mpn = None
-                    ci_low = None
-                    ci_high = None
-
-                    if total_count == 9:
-                        tubes = detections_to_tubes(detections)
-                        x, y, z = tubes_to_xyz(tubes)
-                        mpn_result = lookup_mpn(x, y, z)
-
-                        pattern = mpn_result["pattern"]
-                        mpn = mpn_result["mpn"]
-                        ci_low = mpn_result["low"]
-                        ci_high = mpn_result["high"]
+                    img_b64 = base64.b64encode(annotated_img_bytes).decode("utf-8")
+                    mpn = _compute_mpn(detections, total_count)
 
                     await websocket.send_json({
                         "mode": "client",
                         "detections": detections,
                         "total_tubes": total_count,
-                        "tubes": tubes,
-                        "pattern": pattern,
-                        "mpn": mpn,
-                        "ci_low": ci_low,
-                        "ci_high": ci_high,
-                        "image": img_b64
+                        **mpn,
+                        "image": img_b64,
                     })
 
-                # -------------------------
-                # CONTROL MESSAGES
-                # -------------------------
+                # ---------------------------------------------------------
+                # CONTROL MESSAGES — start/stop server camera, update conf
+                # ---------------------------------------------------------
                 elif "text" in data:
-                    import json
                     msg = json.loads(data["text"])
 
                     if msg.get("action") == "start_server_stream":
                         if not camera.is_running:
-                            camera.start(0)
-                            
+                            # FIX: parse resolution from the message and pass
+                            # it to camera.start() — previously this was ignored
+                            # and the camera always defaulted to 640x480.
+                            resolution = msg.get("resolution", "640x480")
+                            try:
+                                width, height = map(int, resolution.split("x"))
+                            except ValueError:
+                                width, height = 640, 480
+                                logger.warning("Invalid resolution '%s', using 640x480.", resolution)
+                            camera.start(0, width=width, height=height)
+
                     elif msg.get("action") == "stop_server_stream":
                         camera.stop()
-                        
+
+                    elif msg.get("action") == "set_conf":
+                        # FIX: frontend confidence slider now updates inference
+                        # in real time by sending this message on slider change.
+                        try:
+                            session_conf = float(msg.get("value", 0.4))
+                            logger.debug("Session confidence updated to %.2f", session_conf)
+                        except (TypeError, ValueError):
+                            logger.warning("Invalid conf value received: %s", msg.get("value"))
+
             except asyncio.TimeoutError:
-                # -------------------------
-                # SERVER MODE (Raspberry Pi)
-                # -------------------------
-                if camera.is_running:
-                    frame = camera.get_frame()
+                # ---------------------------------------------------------
+                # SERVER MODE — Pi camera, polled on timeout
+                # ---------------------------------------------------------
+                if not camera.is_running:
+                    continue
 
-                    if frame is not None:
-                        success, encoded_img = cv2.imencode('.jpg', frame)
+                frame = camera.get_frame()
+                if frame is None:
+                    continue
 
-                        if success:
-                            image_bytes = encoded_img.tobytes()
+                success, encoded_img = cv2.imencode(".jpg", frame)
+                if not success:
+                    continue
 
-                            detections, total_count, annotated_img_bytes = \
-                                inference.run_inference_with_count(image_bytes)
+                image_bytes = encoded_img.tobytes()
+                detections, total_count, annotated_img_bytes = \
+                    inference.run_inference_with_count(image_bytes, conf=session_conf)
 
-                            img_b64 = base64.b64encode(
-                                annotated_img_bytes
-                            ).decode('utf-8')
+                img_b64 = base64.b64encode(annotated_img_bytes).decode("utf-8")
+                mpn = _compute_mpn(detections, total_count)
 
-                            # ---- MPN Integration ----
-                            tubes = []
-                            pattern = None
-                            mpn = None
-                            ci_low = None
-                            ci_high = None
+                await websocket.send_json({
+                    "mode": "server",
+                    "detections": detections,
+                    "total_tubes": total_count,
+                    **mpn,
+                    "image": img_b64,
+                })
 
-                            if total_count == 9:
-                                tubes = detections_to_tubes(detections)
-                                x, y, z = tubes_to_xyz(tubes)
-                                mpn_result = lookup_mpn(x, y, z)
+                await asyncio.sleep(0.05)
 
-                                pattern = mpn_result["pattern"]
-                                mpn = mpn_result["mpn"]
-                                ci_low = mpn_result["low"]
-                                ci_high = mpn_result["high"]
-
-                            await websocket.send_json({
-                                "mode": "server",
-                                "detections": detections,
-                                "total_tubes": total_count,
-                                "tubes": tubes,
-                                "pattern": pattern,
-                                "mpn": mpn,
-                                "ci_low": ci_low,
-                                "ci_high": ci_high,
-                                "image": img_b64
-                            })
-                            
-                    await asyncio.sleep(0.05)
-                    
     except WebSocketDisconnect:
-        print("Client disconnected")
+        logger.info("WebSocket: client disconnected normally.")
 
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception:
+        # FIX: use logging.exception so the full traceback appears in logs,
+        # not just a one-line print with no stack trace.
+        logger.exception("WebSocket: unexpected error.")
 
     finally:
         camera.stop()
         try:
             await websocket.close()
-        except:
-            pass
+        except Exception:
+            pass  # already closed — nothing to do

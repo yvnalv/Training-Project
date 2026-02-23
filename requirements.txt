@@ -1,5 +1,13 @@
-ultralytics
-fastapi
-uvicorn
-python-multipart
-pillow
+# Core ML
+ultralytics>=8.0,<9.0
+
+# Web framework
+fastapi>=0.100,<1.0
+uvicorn>=0.20,<1.0
+python-multipart>=0.0.6
+jinja2>=3.1,<4.0        # Required by FastAPI Jinja2Templates (was missing)
+
+# Image processing
+pillow>=10.0,<12.0
+opencv-python-headless>=4.8,<5.0  # headless = no GUI deps, safer for RPi server use (was missing)
+numpy>=1.24,<3.0                  # Required by OpenCV + YOLO (was missing)

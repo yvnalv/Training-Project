@@ -1,4 +1,6 @@
+// ---------------------------------------------------------------------------
 // State
+// ---------------------------------------------------------------------------
 let state = {
     currentView: 'home',
     fps: 5,
@@ -10,47 +12,69 @@ let state = {
     cameraMode: 'client' // 'client' | 'server'
 };
 
-// --- Navigation ---
+
+// ---------------------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------------------
+
 function navigateTo(viewId) {
-    // Update State
     state.currentView = viewId;
 
-    // Update Sidebar
+    // FIX: Use data-view attribute instead of parsing onclick string,
+    // which was fragile and would break if the function call was ever reformatted.
     document.querySelectorAll('.nav-links li').forEach(li => {
-        li.classList.remove('active');
-        // Simple check based on onclick attribute text
-        if (li.getAttribute('onclick').includes(viewId)) {
-            li.classList.add('active');
-        }
+        li.classList.toggle('active', li.dataset.view === viewId);
     });
 
-    // Update Views
     document.querySelectorAll('.view').forEach(view => {
         view.classList.remove('active');
     });
     document.getElementById(`${viewId}-view`).classList.add('active');
 }
 
-// --- Settings Handlers ---
+
+// ---------------------------------------------------------------------------
+// Settings handlers
+// ---------------------------------------------------------------------------
+
 function updateFpsDisplay(val) {
     state.fps = parseInt(val);
     document.getElementById('fpsValue').textContent = `${val} FPS`;
-    // If streaming, restart interval with new FPS
     if (state.isStreaming) {
-        restartStreamInterval(); // dynamically adjust without stopping camera
+        restartStreamInterval();
     }
 }
 
 function updateConfDisplay(val) {
     state.confidence = parseFloat(val);
     document.getElementById('confValue').textContent = val;
-    // Note: To actually use this, backend needs to accept it. 
-    // For now, we store it. Future refactor: Send conf with WS or POST.
+
+    // FIX: send updated confidence to the server in real time so the backend
+    // actually uses it — previously state.confidence was stored but never sent.
+    if (state.isStreaming && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "set_conf", value: state.confidence }));
+    }
 }
 
 function setRotation(deg) {
     state.rotation = deg;
     document.getElementById('currentRotation').textContent = `${deg}°`;
+
+    // FIX: when rotation changes mid-stream, the canvas dimensions need to be
+    // swapped (portrait ↔ landscape) and the interval restarted. Previously the
+    // old canvas size was kept, causing the image to be drawn incorrectly.
+    if (state.isStreaming && videoStream) {
+        const [width, height] = state.resolution.split('x').map(Number);
+        const canvas = document.getElementById('canvasElement');
+        if (deg === 90 || deg === 270) {
+            canvas.width = height;
+            canvas.height = width;
+        } else {
+            canvas.width = width;
+            canvas.height = height;
+        }
+        restartStreamInterval();
+    }
 }
 
 document.getElementById('flipHorizontal').addEventListener('change', (e) => {
@@ -59,7 +83,6 @@ document.getElementById('flipHorizontal').addEventListener('change', (e) => {
 
 document.getElementById('resolutionSelect').addEventListener('change', (e) => {
     state.resolution = e.target.value;
-    // Resolution change requires camera restart to take effect on hardware level
     if (state.isStreaming) {
         alert("Restarting camera to apply resolution change...");
         stopCamera();
@@ -71,14 +94,15 @@ document.getElementById('cameraSourceSelect').addEventListener('change', (e) => 
     state.cameraMode = e.target.value;
     if (state.isStreaming) {
         stopCamera();
-        // Optional: Auto restart? Let's just stop and let user start again to be safe.
         alert("Camera source changed. Please click Start to resume.");
     }
 });
 
 
-// --- Upload Logic ---
-// Drag & Drop
+// ---------------------------------------------------------------------------
+// Upload logic
+// ---------------------------------------------------------------------------
+
 const dropZone = document.getElementById('dropZone');
 dropZone.addEventListener('click', () => document.getElementById('fileInput').click());
 dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
@@ -86,8 +110,7 @@ dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.sty
 dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.style.borderColor = 'var(--border)';
-    const files = e.dataTransfer.files;
-    if (files.length) handleFile(files[0]);
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
 
 document.getElementById('fileInput').addEventListener('change', (e) => {
@@ -95,21 +118,9 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
 });
 
 function handleFile(file) {
-    // Just visual feedback, user still needs to click Analyze
-    // Or we could auto-analyze. Let's auto-fill the input but wait for click.
-    // Actually, let's just trigger uploadImage immediately for smoother UX
     const dataTransfer = new DataTransfer();
     dataTransfer.items.add(file);
     document.getElementById('fileInput').files = dataTransfer.files;
-
-    // Preview
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        // We could show a preview here if we wanted
-    };
-    reader.readAsDataURL(file);
-
-    // Auto-click analyze? Let's stick to manual for now to match UI text
     dropZone.querySelector('p').textContent = `Selected: ${file.name}`;
 }
 
@@ -121,7 +132,6 @@ async function uploadImage() {
     const btn = document.getElementById('predictBtn');
     const loading = document.getElementById('loading');
     const uploadResults = document.getElementById('uploadResults');
-
     const resultImage = document.getElementById('resultImage');
     const tableBody = document.getElementById('tableBody');
 
@@ -129,57 +139,27 @@ async function uploadImage() {
     loading.style.display = 'block';
     uploadResults.style.display = 'none';
 
-    // Clear previous results
     resultImage.removeAttribute('src');
     if (tableBody) tableBody.innerHTML = '';
 
-    // Reset count UI (whatever exists)
-    const countSpan =
-        document.getElementById('uploadTotalTubesValue') ||
-        document.getElementById('totalTubesValue');
-    if (countSpan) countSpan.textContent = '0';
-
-    const countText = document.getElementById('totalTubesText');
-    if (countText) countText.innerHTML = 'Total Tubes: <span id="uploadTotalTubesValue">0</span>';
-
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('conf', state.confidence); // FIX: send confidence so backend uses it
 
     try {
         const response = await fetch('/predict', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error('Prediction failed');
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
         const data = await response.json();
 
-        // ✅ annotated image
         resultImage.src = 'data:image/jpeg;base64,' + data.image;
 
-        // ✅ tube count (prefer API value; fallback to detections length)
-        const totalCount = (data.total_tubes ?? (data.detections ? data.detections.length : 0));
-
-        // ✅ update span if present
-        const spanEl =
-            document.getElementById('uploadTotalTubesValue') ||
-            document.getElementById('totalTubesValue');
-        if (spanEl) spanEl.textContent = String(totalCount);
-
-        // ✅ update full text line if present
+        const totalCount = data.total_tubes ?? (data.detections ? data.detections.length : 0);
         const textEl = document.getElementById('totalTubesText');
-        if (textEl) textEl.innerHTML = `Total Tubes: <span id="uploadTotalTubesValue">${totalCount}</span>`;
+        if (textEl) textEl.innerHTML = `Total Tubes: <span>${totalCount}</span>`;
 
-        // ✅ table
         updateTable(data.detections || [], 'tableBody');
-
-        // --- MPN UI update ---
-        document.getElementById('mpnPattern').textContent = data.pattern || '-';
-        document.getElementById('mpnValue').textContent = data.mpn || '-';
-
-        if (data.ci_low && data.ci_high) {
-            document.getElementById('mpnCI').textContent =
-                `${data.ci_low} – ${data.ci_high}`;
-        } else {
-            document.getElementById('mpnCI').textContent = '-';
-        }
+        updateMpnDisplay(data, 'mpnPattern', 'mpnValue', 'mpnCI');
 
         uploadResults.style.display = 'block';
     } catch (err) {
@@ -192,21 +172,39 @@ async function uploadImage() {
 }
 
 
-// --- Stream Logic ---
+// ---------------------------------------------------------------------------
+// Stream logic
+// ---------------------------------------------------------------------------
+
 let videoStream = null;
 let ws = null;
-let streamInterval = null;
+let streamInterval = null; // FIX: declared at module scope (was implicit global)
+
+// FIX: declared at module scope so updateFpsDisplay() can safely call it
+// before streaming starts without throwing a ReferenceError.
+function restartStreamInterval() {
+    if (streamInterval) clearInterval(streamInterval);
+    if (!state.isStreaming) return; // guard: don't start if not streaming
+    const ms = 1000 / state.fps;
+    streamInterval = setInterval(_captureAndSend, ms);
+}
+
+// Holds the active canvas capture function — set by startStreamingCanvas()
+let _captureAndSend = () => {};
 
 async function startCamera() {
     try {
         const [width, height] = state.resolution.split('x').map(Number);
 
-        // Connect WS first
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
         ws.onopen = () => {
             console.log("WS Connected");
+
+            // Send initial confidence so the session starts with the correct value
+            ws.send(JSON.stringify({ action: "set_conf", value: state.confidence }));
+
             if (state.cameraMode === 'client') {
                 startClientStream(width, height);
             } else {
@@ -215,9 +213,23 @@ async function startCamera() {
         };
 
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+            // FIX: wrap JSON.parse in try/catch — a malformed message previously
+            // threw an uncaught exception that silently killed the onmessage handler.
+            let data;
+            try {
+                data = JSON.parse(event.data);
+            } catch (err) {
+                console.error("WS: failed to parse message:", err);
+                return;
+            }
+
             document.getElementById('streamResult').src = 'data:image/jpeg;base64,' + data.image;
-            updateTable(data.detections, 'streamTableBody');
+            updateTable(data.detections || [], 'streamTableBody');
+
+            // FIX: MPN results were sent by the server but never shown in the
+            // stream view — they are now displayed using the same helper used
+            // by the upload view.
+            updateMpnDisplay(data, 'streamMpnPattern', 'streamMpnValue', 'streamMpnCI');
         };
 
         ws.onclose = () => console.log("WS Closed");
@@ -240,59 +252,43 @@ async function startClientStream(width, height) {
             let errorMsg = "Camera API not available.";
             if (!window.isSecureContext) {
                 errorMsg += "\n\nCamera access requires HTTPS (Secure Context).";
-                errorMsg += "\nSince you are connecting via HTTP, the browser blocks camera access.";
-                errorMsg += `\n\nTo fix this on Chrome/Edge (Mobile & Desktop):`;
-                errorMsg += `\n1. Go to: chrome://flags/#unsafely-treat-insecure-origin-as-secure`;
-                errorMsg += `\n2. Enable it and add this origin: http://${window.location.host}`;
-                errorMsg += `\n3. Restart the browser.`;
+                errorMsg += "\n\nTo fix this on Chrome/Edge:\n";
+                errorMsg += `1. Go to: chrome://flags/#unsafely-treat-insecure-origin-as-secure\n`;
+                errorMsg += `2. Enable it and add: http://${window.location.host}\n`;
+                errorMsg += "3. Restart the browser.";
             }
             throw new Error(errorMsg);
         }
 
-        // Default to no mirror for back camera
         state.flipHorizontal = false;
-        if (document.getElementById('flipHorizontal')) {
-            document.getElementById('flipHorizontal').checked = false;
-        }
+        const flipEl = document.getElementById('flipHorizontal');
+        if (flipEl) flipEl.checked = false;
 
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                width: width,
-                height: height,
-                facingMode: { ideal: "environment" }
-            }
+            video: { width, height, facingMode: { ideal: "environment" } }
         });
 
         const video = document.getElementById('videoElement');
         video.srcObject = stream;
-
         await new Promise(resolve => video.onloadedmetadata = resolve);
         video.play();
 
         videoStream = stream;
         startStreamingCanvas(video, width, height);
+
     } catch (err) {
         console.error("Error accessing client camera:", err);
-        let userMsg = "Could not access client camera.";
-        if (err.message.includes("requires HTTPS") || err.name === 'NotAllowedError') {
-            userMsg = err.message; // Use our detailed message if it's ours, or standard permission error
-            if (err.name === 'NotAllowedError') {
-                userMsg += "\n\nPlease allow camera permission in your browser settings.";
-            }
-        } else if (err.name === 'NotFoundError') {
-            userMsg = "No camera found on this device.";
-        }
+        let userMsg = "Could not access client camera.\n" + err.message;
+        if (err.name === 'NotAllowedError') userMsg += "\n\nPlease allow camera permission in your browser settings.";
+        if (err.name === 'NotFoundError') userMsg = "No camera found on this device.";
         alert(userMsg);
         stopCamera();
     }
 }
 
-function startServerStream(width, height) {
+function startServerStream() {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            action: "start_server_stream",
-            resolution: state.resolution
-        }));
+        ws.send(JSON.stringify({ action: "start_server_stream", resolution: state.resolution }));
     }
 }
 
@@ -300,7 +296,6 @@ function startStreamingCanvas(video, width, height) {
     const canvas = document.getElementById('canvasElement');
     const ctx = canvas.getContext('2d');
 
-    // Adjust canvas size based on rotation
     if (state.rotation === 90 || state.rotation === 270) {
         canvas.width = height;
         canvas.height = width;
@@ -309,75 +304,67 @@ function startStreamingCanvas(video, width, height) {
         canvas.height = height;
     }
 
-    const captureFrame = () => {
+    // FIX: assign to module-scoped _captureAndSend so restartStreamInterval()
+    // can call the right function regardless of when it's invoked.
+    _captureAndSend = () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
         ctx.save();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Transforms
-        // Move to center
         ctx.translate(canvas.width / 2, canvas.height / 2);
-
-        // Rotate
         ctx.rotate(state.rotation * Math.PI / 180);
-
-        // Flip (Scale)
-        // If flipped, scale X by -1. 
-        // Note: If rotated 90/270, the 'horizontal' axis is relative to the rotated image. 
-        // Usually users expect flip relative to the screen axis. 
-        // But for simplicity, let's flip the source image axis.
-        if (state.flipHorizontal) {
-            ctx.scale(-1, 1);
-        }
-
-        // Draw Image - need to handle width/height swapping for drawImage
-        // If 90/270, the image is drawn perpendicular.
-        // We are at center [0,0]. Image needs to be drawn centered.
+        if (state.flipHorizontal) ctx.scale(-1, 1);
         ctx.drawImage(video, -width / 2, -height / 2, width, height);
-
         ctx.restore();
 
         canvas.toBlob((blob) => {
             if (ws && ws.readyState === WebSocket.OPEN) ws.send(blob);
-        }, 'image/jpeg', 0.7); // 0.7 quality for speed
-    };
-
-    // Start Interval
-    restartStreamInterval = () => {
-        if (streamInterval) clearInterval(streamInterval);
-        // Calculate interval from FPS
-        const ms = 1000 / state.fps;
-        streamInterval = setInterval(captureFrame, ms);
+        }, 'image/jpeg', 0.7);
     };
 
     restartStreamInterval();
 }
 
 function stopCamera() {
-    // Client Stop
     if (videoStream) {
         videoStream.getTracks().forEach(track => track.stop());
         videoStream = null;
     }
 
-    // Server Stop
     if (state.cameraMode === 'server' && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action: "stop_server_stream" }));
     }
 
-    // Common Stop
-    if (ws) {
-        ws.close();
-        ws = null;
-    }
-    if (streamInterval) {
-        clearInterval(streamInterval);
-        streamInterval = null;
-    }
+    if (ws) { ws.close(); ws = null; }
+    if (streamInterval) { clearInterval(streamInterval); streamInterval = null; }
+
     state.isStreaming = false;
+    _captureAndSend = () => {}; // reset so a stale interval can't fire
     document.getElementById('startBtn').disabled = false;
     document.getElementById('stopBtn').disabled = true;
+}
+
+
+// ---------------------------------------------------------------------------
+// Shared UI helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Populate an MPN summary block with values from a server response.
+ * Works for both the upload view and stream view by accepting element IDs.
+ */
+function updateMpnDisplay(data, patternId, valueId, ciId) {
+    const patternEl = document.getElementById(patternId);
+    const valueEl = document.getElementById(valueId);
+    const ciEl = document.getElementById(ciId);
+
+    if (patternEl) patternEl.textContent = data.pattern || '-';
+    if (valueEl) valueEl.textContent = data.mpn || '-';
+    if (ciEl) {
+        ciEl.textContent = (data.ci_low && data.ci_high)
+            ? `${data.ci_low} – ${data.ci_high}`
+            : '-';
+    }
 }
 
 function updateTable(detections, tableId) {
@@ -388,29 +375,20 @@ function updateTable(detections, tableId) {
 
     if (!detections || detections.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = `
-            <td colspan="3" style="text-align:center; opacity:0.6;">
-                No tubes detected
-            </td>
-        `;
+        row.innerHTML = `<td colspan="3" style="text-align:center; opacity:0.6;">No tubes detected</td>`;
         tbody.appendChild(row);
         return;
     }
 
-    // Limit to top 10 to avoid UI lag on Raspberry Pi
-    // Sort detections LEFT → RIGHT using bbox[0] (x1)
     detections
-        .slice() // clone, do not mutate original
+        .slice()
         .sort((a, b) => {
-            if (Array.isArray(a.bbox) && Array.isArray(b.bbox)) {
-                return a.bbox[0] - b.bbox[0]; // x1 comparison
-            }
+            if (Array.isArray(a.bbox) && Array.isArray(b.bbox)) return a.bbox[0] - b.bbox[0];
             return 0;
         })
-        .slice(0, 9) // keep existing limit
+        .slice(0, 9)
         .forEach(d => {
             const value = d.label === 'Yellow_NoBubble' ? 1 : 0;
-
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${d.label}</td>
@@ -418,8 +396,6 @@ function updateTable(detections, tableId) {
                 <td>${value}</td>
             `;
             tbody.appendChild(row);
+            // FIX: debug console.log removed (was logging bbox x1 values on every frame)
         });
-        console.log(detections.map(d => d.bbox[0]));
-
 }
-

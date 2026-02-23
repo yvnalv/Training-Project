@@ -17,6 +17,7 @@
 
 <body>
     <div id="app">
+
         <!-- Sidebar Navigation -->
         <nav class="sidebar">
             <div class="brand">
@@ -24,19 +25,21 @@
                 <span>VialVision</span>
             </div>
             <ul class="nav-links">
-                <li class="active" onclick="navigateTo('home')">
+                <!-- FIX: added data-view attributes to all nav items so navigateTo()
+                     can use dataset.view instead of parsing the onclick string -->
+                <li class="active" data-view="home" onclick="navigateTo('home')">
                     <i class="fa-solid fa-house"></i>
                     <span>Home</span>
                 </li>
-                <li onclick="navigateTo('upload')">
+                <li data-view="upload" onclick="navigateTo('upload')">
                     <i class="fa-solid fa-upload"></i>
                     <span>Upload</span>
                 </li>
-                <li onclick="navigateTo('stream')">
+                <li data-view="stream" onclick="navigateTo('stream')">
                     <i class="fa-solid fa-video"></i>
                     <span>Live Stream</span>
                 </li>
-                <li onclick="navigateTo('settings')">
+                <li data-view="settings" onclick="navigateTo('settings')">
                     <i class="fa-solid fa-gear"></i>
                     <span>Settings</span>
                 </li>
@@ -68,7 +71,7 @@
                     </div>
                 </div>
             </section>
-            
+
             <!-- UPLOAD VIEW -->
             <section id="upload-view" class="view">
                 <header class="view-header">
@@ -82,72 +85,99 @@
                             <p>Drag & drop or click to upload</p>
                             <input type="file" id="fileInput" accept="image/*" hidden>
                         </div>
-
                         <button class="btn primary" id="predictBtn" onclick="uploadImage()">
                             <i class="fa-solid fa-bolt"></i> Analyze
                         </button>
-                        </div>
+                    </div>
 
-                        <div class="panel display-panel">
+                    <div class="panel display-panel">
                         <div id="loading" class="loader" style="display:none;">Analyzing...</div>
 
                         <div class="result-container" id="uploadResults" style="display:none;">
                             <img id="resultImage" alt="Result">
 
-                            <!-- MPN RESULT -->
+                            <!-- MPN Result -->
                             <div class="result-summary">
                                 <div class="summary-item">
                                     <strong>MPN Result</strong>
                                 </div>
                                 <div class="summary-item">
-                                    Pattern: <span id="mpnPattern">-</span>
+                                    <span class="summary-label">Pattern</span>
+                                    <span class="summary-value" id="mpnPattern">-</span>
                                 </div>
                                 <div class="summary-item">
-                                    MPN / g: <span id="mpnValue">-</span>
+                                    <span class="summary-label">MPN / g</span>
+                                    <span class="summary-value" id="mpnValue">-</span>
                                 </div>
                                 <div class="summary-item">
-                                    95% CI: <span id="mpnCI">-</span>
+                                    <span class="summary-label">95% CI</span>
+                                    <span class="summary-value" id="mpnCI">-</span>
                                 </div>
                             </div>
 
                             <div class="table-wrapper">
-                            <table>
-                                <thead>
-                                <tr>
-                                    <th>Object</th>
-                                    <th>Conf</th>
-                                    <th>Value</th>
-                                </tr>
-                                </thead>
-                                <tbody id="tableBody"></tbody>
-                            </table>
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Object</th>
+                                            <th>Conf</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tableBody"></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
                 </div>
             </section>
 
-
             <!-- STREAM VIEW -->
             <section id="stream-view" class="view">
                 <header class="view-header">
                     <h1>Live Stream</h1>
                     <div class="header-controls">
-                        <button class="btn success" id="startBtn" onclick="startCamera()"><i
-                                class="fa-solid fa-play"></i> Start</button>
-                        <button class="btn danger" id="stopBtn" onclick="stopCamera()" disabled><i
-                                class="fa-solid fa-stop"></i> Stop</button>
+                        <button class="btn success" id="startBtn" onclick="startCamera()">
+                            <i class="fa-solid fa-play"></i> Start
+                        </button>
+                        <button class="btn danger" id="stopBtn" onclick="stopCamera()" disabled>
+                            <i class="fa-solid fa-stop"></i> Stop
+                        </button>
                     </div>
                 </header>
+
                 <div class="workspace stream-workspace">
                     <div class="video-container">
                         <!-- Hidden source video -->
                         <video id="videoElement" playsinline style="display:none;"></video>
                         <!-- Canvas for processing/sending -->
                         <canvas id="canvasElement" style="display:none;"></canvas>
-                        <!-- Result from server -->
+                        <!-- Annotated result from server -->
                         <img id="streamResult" alt="Live Feed">
                     </div>
+
+                    <!-- FIX: MPN summary added to stream view — the server was already
+                         sending pattern/mpn/ci_low/ci_high over the WebSocket but the
+                         UI had no elements to display them. IDs match what script.js
+                         now passes to updateMpnDisplay(). -->
+                    <div class="result-summary">
+                        <div class="summary-item">
+                            <strong>MPN Result</strong>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">Pattern</span>
+                            <span class="summary-value" id="streamMpnPattern">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">MPN / g</span>
+                            <span class="summary-value" id="streamMpnValue">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">95% CI</span>
+                            <span class="summary-value" id="streamMpnCI">-</span>
+                        </div>
+                    </div>
+
                     <div class="stats-panel">
                         <h3>Detections</h3>
                         <div class="table-wrapper">
@@ -156,6 +186,10 @@
                                     <tr>
                                         <th>Object</th>
                                         <th>Conf</th>
+                                        <!-- FIX: "Value" column was missing from stream table
+                                             but updateTable() always renders three columns,
+                                             causing a misaligned layout -->
+                                        <th>Value</th>
                                     </tr>
                                 </thead>
                                 <tbody id="streamTableBody"></tbody>
@@ -236,7 +270,7 @@
         </main>
     </div>
 
-    <script src="/static/js/script.js?v=2"></script>
+    <script src="/static/js/script.js?v=3"></script>
 </body>
 
 </html>
