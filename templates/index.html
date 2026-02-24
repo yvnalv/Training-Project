@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VialVision</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="/static/css/style.css?v=4">
+  <link rel="stylesheet" href="/static/css/style.css?v=5">
 </head>
 <body>
 <div id="app">
@@ -28,6 +28,14 @@
       <li data-view="stream" onclick="navigateTo('stream')">
         <i class="fa-solid fa-video"></i>
         <span>Stream</span>
+      </li>
+      <li data-view="history" onclick="navigateTo('history')">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+        <span>History</span>
+      </li>
+      <li data-view="guideline" onclick="navigateTo('guideline')">
+        <i class="fa-solid fa-book-open"></i>
+        <span>Guideline</span>
       </li>
       <li data-view="settings" onclick="navigateTo('settings')">
         <i class="fa-solid fa-gear"></i>
@@ -60,6 +68,16 @@
           <div class="card-icon"><i class="fa-solid fa-video"></i></div>
           <h2>Live Stream</h2>
           <p>Real-time detection from camera feed, optimised for RPi.</p>
+        </div>
+        <div class="card action-card" onclick="navigateTo('history')">
+          <div class="card-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+          <h2>History</h2>
+          <p>Browse past prediction results and export as CSV.</p>
+        </div>
+        <div class="card action-card" onclick="navigateTo('guideline')">
+          <div class="card-icon"><i class="fa-solid fa-book-open"></i></div>
+          <h2>MPN Guideline</h2>
+          <p>Reference table and interpretation guide for MPN results.</p>
         </div>
       </div>
     </section>
@@ -110,6 +128,10 @@
                 <span class="summary-label">95% CI</span>
                 <span class="summary-value" id="mpnCI">–</span>
               </div>
+              <div class="summary-item risk-item" id="mpnRiskItem">
+                <span class="summary-label">Risk</span>
+                <span class="summary-value" id="mpnRisk">–</span>
+              </div>
             </div>
 
             <!-- Detection table -->
@@ -148,7 +170,6 @@
       </header>
 
       <div class="workspace stream-workspace">
-        <!-- Video -->
         <div class="video-container">
           <video id="videoElement" playsinline style="display:none;"></video>
           <canvas id="canvasElement" style="display:none;"></canvas>
@@ -157,9 +178,7 @@
 
         <!-- MPN live result -->
         <div class="result-summary">
-          <div class="summary-item">
-            <strong>MPN</strong>
-          </div>
+          <div class="summary-item"><strong>MPN</strong></div>
           <div class="summary-item">
             <span class="summary-label">Pattern</span>
             <span class="summary-value" id="streamMpnPattern">–</span>
@@ -171,6 +190,10 @@
           <div class="summary-item">
             <span class="summary-label">95% CI</span>
             <span class="summary-value" id="streamMpnCI">–</span>
+          </div>
+          <div class="summary-item risk-item" id="streamMpnRiskItem">
+            <span class="summary-label">Risk</span>
+            <span class="summary-value" id="streamMpnRisk">–</span>
           </div>
         </div>
 
@@ -191,6 +214,175 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- HISTORY VIEW -->
+    <section id="history-view" class="view">
+      <header class="view-header">
+        <div class="view-header-left">
+          <h1>History</h1>
+          <!-- Record count updated by JS -->
+          <p id="historySubtitle">Loading records…</p>
+        </div>
+        <div class="header-controls">
+          <button class="btn primary sm" onclick="exportHistory()">
+            <i class="fa-solid fa-file-csv"></i>
+            <span class="btn-label">Export CSV</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Loading state -->
+      <div id="historyLoading" class="loader" style="display:none;">
+        Loading history…
+      </div>
+
+      <!-- Empty state -->
+      <div id="historyEmpty" class="history-empty" style="display:none;">
+        <i class="fa-solid fa-inbox"></i>
+        <p>No predictions yet. Upload an image to get started.</p>
+      </div>
+
+      <!-- Record list -->
+      <div id="historyList" class="history-list"></div>
+
+      <!-- Load more -->
+      <div id="historyLoadMore" class="history-loadmore" style="display:none;">
+        <button class="btn primary sm" onclick="loadMoreHistory()">
+          <i class="fa-solid fa-chevron-down"></i> Load More
+        </button>
+      </div>
+    </section>
+
+
+    <!-- GUIDELINE VIEW -->
+    <section id="guideline-view" class="view">
+      <header class="view-header">
+        <div class="view-header-left">
+          <h1>MPN Guideline</h1>
+          <p>Most Probable Number reference for 3-3-3 tube method</p>
+        </div>
+      </header>
+
+      <!-- What is MPN -->
+      <div class="guide-section">
+        <h2 class="guide-section-title">
+          <i class="fa-solid fa-circle-info"></i> What is MPN?
+        </h2>
+        <p class="guide-text">
+          The <strong>Most Probable Number (MPN)</strong> method estimates the concentration
+          of viable microorganisms in a sample using serial dilutions and presence/absence
+          detection. It is widely used for coliform bacteria testing in food and water safety.
+        </p>
+      </div>
+
+      <!-- How the 9-tube test works -->
+      <div class="guide-section">
+        <h2 class="guide-section-title">
+          <i class="fa-solid fa-vials"></i> The 3-3-3 Tube Method
+        </h2>
+        <p class="guide-text">
+          Nine tubes are inoculated across three dilution levels — three tubes per dilution.
+          A <span class="guide-badge positive">yellow / no bubble</span> result indicates a
+          <strong>positive</strong> tube (microbial growth detected).
+          A <span class="guide-badge negative">clear / bubble</span> result is
+          <strong>negative</strong>.
+        </p>
+        <div class="guide-dilution-row">
+          <div class="guide-dilution-group">
+            <div class="guide-dilution-label">Group 1 — 0.1 g</div>
+            <div class="guide-dilution-dots">
+              <span class="tube-dot positive">1</span>
+              <span class="tube-dot positive">1</span>
+              <span class="tube-dot negative">0</span>
+            </div>
+            <div class="guide-dilution-note">Tubes 1–3</div>
+          </div>
+          <i class="fa-solid fa-arrow-right guide-arrow"></i>
+          <div class="guide-dilution-group">
+            <div class="guide-dilution-label">Group 2 — 0.01 g</div>
+            <div class="guide-dilution-dots">
+              <span class="tube-dot positive">1</span>
+              <span class="tube-dot negative">0</span>
+              <span class="tube-dot negative">0</span>
+            </div>
+            <div class="guide-dilution-note">Tubes 4–6</div>
+          </div>
+          <i class="fa-solid fa-arrow-right guide-arrow"></i>
+          <div class="guide-dilution-group">
+            <div class="guide-dilution-label">Group 3 — 0.001 g</div>
+            <div class="guide-dilution-dots">
+              <span class="tube-dot negative">0</span>
+              <span class="tube-dot negative">0</span>
+              <span class="tube-dot negative">0</span>
+            </div>
+            <div class="guide-dilution-note">Tubes 7–9</div>
+          </div>
+          <i class="fa-solid fa-arrow-right guide-arrow"></i>
+          <div class="guide-dilution-group guide-result-group">
+            <div class="guide-dilution-label">Pattern</div>
+            <div class="guide-pattern-pill">P210</div>
+            <div class="guide-dilution-note">MPN = 15 / g</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interpretation -->
+      <div class="guide-section">
+        <h2 class="guide-section-title">
+          <i class="fa-solid fa-triangle-exclamation"></i> Interpretation Guide
+        </h2>
+        <div class="guide-interp-grid">
+          <div class="guide-interp-card safe">
+            <div class="guide-interp-icon"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="guide-interp-label">Safe</div>
+            <div class="guide-interp-range">&lt; 3 MPN/g</div>
+            <div class="guide-interp-desc">Below detection threshold. Acceptable for consumption.</div>
+          </div>
+          <div class="guide-interp-card low">
+            <div class="guide-interp-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
+            <div class="guide-interp-label">Low Risk</div>
+            <div class="guide-interp-range">3 – 20 MPN/g</div>
+            <div class="guide-interp-desc">Low contamination. Monitor and re-test recommended.</div>
+          </div>
+          <div class="guide-interp-card medium">
+            <div class="guide-interp-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div class="guide-interp-label">Moderate</div>
+            <div class="guide-interp-range">21 – 110 MPN/g</div>
+            <div class="guide-interp-desc">Elevated contamination. Further investigation required.</div>
+          </div>
+          <div class="guide-interp-card high">
+            <div class="guide-interp-icon"><i class="fa-solid fa-circle-xmark"></i></div>
+            <div class="guide-interp-label">High Risk</div>
+            <div class="guide-interp-range">&gt; 110 MPN/g</div>
+            <div class="guide-interp-desc">High contamination. Sample unsafe. Action required.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Full MPN Reference Table -->
+      <div class="guide-section">
+        <h2 class="guide-section-title">
+          <i class="fa-solid fa-table"></i> Full MPN Reference Table
+        </h2>
+        <p class="guide-text">All 40 patterns for the 3-3-3 tube dilution series.</p>
+        <div class="guide-table-wrap table-wrapper">
+          <table class="guide-table">
+            <thead>
+              <tr>
+                <th>Pattern</th>
+                <th>Tubes (x-y-z)</th>
+                <th>MPN / g</th>
+                <th>95% CI Low</th>
+                <th>95% CI High</th>
+                <th>Risk</th>
+              </tr>
+            </thead>
+            <tbody id="guideTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
     </section>
 
     <!-- SETTINGS VIEW -->
@@ -264,6 +456,76 @@
 
   </main>
 </div>
-<script src="/static/js/script.js?v=4"></script>
+
+<!-- ── History Detail Modal ──────────────────────────── -->
+<div id="historyModal" class="modal-overlay" onclick="closeHistoryModal(event)">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+
+    <!-- Header -->
+    <div class="modal-header">
+      <div class="modal-header-left">
+        <span class="modal-pattern" id="modalPattern">–</span>
+        <span class="modal-risk-badge" id="modalRiskBadge"></span>
+        <span class="modal-timestamp" id="modalTimestamp">–</span>
+      </div>
+      <button class="modal-close" onclick="closeHistoryModal()" aria-label="Close">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- Image -->
+    <div class="modal-image-wrap">
+      <img id="modalImage" src="" alt="Annotated result">
+    </div>
+
+    <!-- MPN summary -->
+    <div class="modal-mpn-row">
+      <div class="modal-stat">
+        <span class="modal-stat-label">MPN / g</span>
+        <span class="modal-stat-value accent" id="modalMpn">–</span>
+      </div>
+      <div class="modal-stat modal-stat-risk" id="modalRiskStat">
+        <span class="modal-stat-label">Risk Level</span>
+        <span class="modal-stat-value" id="modalRiskValue">–</span>
+      </div>
+      <div class="modal-stat">
+        <span class="modal-stat-label">95% CI</span>
+        <span class="modal-stat-value" id="modalCI">–</span>
+      </div>
+      <div class="modal-stat">
+        <span class="modal-stat-label">Tubes</span>
+        <span class="modal-stat-value" id="modalTubeCount">–</span>
+      </div>
+      <div class="modal-stat">
+        <span class="modal-stat-label">File</span>
+        <span class="modal-stat-value filename" id="modalFilename">–</span>
+      </div>
+    </div>
+
+    <!-- Tube dots -->
+    <div id="modalTubes" class="modal-tubes"></div>
+
+    <!-- Detections table -->
+    <div class="modal-table-section">
+      <h4 class="modal-section-title">Detections</h4>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Label</th>
+              <th>Confidence</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="modalTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="/static/js/script.js?v=5"></script>
 </body>
 </html>
