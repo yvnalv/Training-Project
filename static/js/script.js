@@ -235,6 +235,22 @@ async function startCamera() {
                 return;
             }
 
+            if (data.error) {
+                if (state.cameraMode === 'server') {
+                    const [width, height] = state.resolution.split('x').map(Number);
+                    alert(`Server camera failed: ${data.error}\n\nFalling back to client camera mode.`);
+                    state.cameraMode = 'client';
+                    const sourceSelect = document.getElementById('cameraSourceSelect');
+                    if (sourceSelect) sourceSelect.value = 'client';
+                    startClientStream(width, height);
+                    return;
+                }
+
+                alert(`Camera error: ${data.error}`);
+                stopCamera();
+                return;
+            }
+
             document.getElementById('streamResult').src = 'data:image/jpeg;base64,' + data.image;
             updateTable(data.detections || [], 'streamTableBody');
 

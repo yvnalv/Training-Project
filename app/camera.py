@@ -1,8 +1,15 @@
 import logging
 import time
+import importlib
+import sys
 from threading import Thread, Lock
 
 import cv2
+
+try:
+    Picamera2 = importlib.import_module("picamera2").Picamera2
+except Exception:
+    Picamera2 = None
 
 logger = logging.getLogger(__name__)
 
@@ -14,25 +21,122 @@ class Camera:
         self._latest_frame = None
         self._frame_lock = Lock()      # FIX: protects latest_frame across threads
         self._thread = None
+        self._backend = None
+        self._picam = None
+
+    def _open_opencv_capture(self, source, width, height):
+        numeric_source = source
+        if isinstance(source, str) and source.isdigit():
+            numeric_source = int(source)
+
+        source_candidates = [numeric_source]
+        if isinstance(numeric_source, int) and numeric_source == 0:
+            source_candidates = [0, 1, 2, 3]
+
+        if sys.platform.startswith("win"):
+            backend_candidates = [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY]
+        elif sys.platform.startswith("linux"):
+            backend_candidates = [cv2.CAP_V4L2, cv2.CAP_ANY]
+        else:
+            backend_candidates = [cv2.CAP_ANY]
+
+        for src in source_candidates:
+            for backend in backend_candidates:
+                if backend == cv2.CAP_ANY:
+                    cap = cv2.VideoCapture(src)
+                else:
+                    cap = cv2.VideoCapture(src, backend)
+
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+                ok, _ = cap.read()
+                if ok:
+                    logger.info("OpenCV camera opened (source=%s, backend=%s)", src, backend)
+                    return cap, src, backend
+
+                cap.release()
+
+        return None, None, None
 
     def start(self, source=0, width=640, height=480):
         if self.is_running:
             return
 
-        self.cap = cv2.VideoCapture(source)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        if source in (0, "0", "pi", "picam") and Picamera2 is not None:
+            try:
+                self._picam = Picamera2()
+                config = self._picam.create_video_configuration(
+                    main={"size": (width, height), "format": "RGB888"}
+                )
+                self._picam.configure(config)
+                self._picam.start()
 
-        if not self.cap.isOpened():
-            raise RuntimeError(f"Could not open camera source: {source}")
+                self._backend = "picamera2"
+                self.is_running = True
+                self._thread = Thread(target=self._capture_loop, daemon=True)
+                self._thread.start()
+                logger.info("Camera started with Picamera2 (%dx%d).", width, height)
+                return
+            except Exception as e:
+                logger.warning("Picamera2 start failed, falling back to OpenCV: %s", e)
+                try:
+                    if self._picam is not None:
+                        self._picam.close()
+                except Exception:
+                    pass
+                self._picam = None
 
+        self.cap, opened_source, opened_backend = self._open_opencv_capture(
+            source, width, height
+        )
+
+        if self.cap is None or not self.cap.isOpened():
+            hint = ""
+            if sys.platform.startswith("win"):
+                hint = (
+                    " On Windows, make sure no other app is using the webcam, "
+                    "privacy camera access is enabled, and try source 0/1."
+                )
+            elif sys.platform.startswith("linux") and source in (0, "0", "pi", "picam"):
+                hint = " On Raspberry Pi camera module, install/use python3-picamera2."
+            raise RuntimeError(
+                f"Could not open camera source: {source}.{hint}"
+            )
+
+        self._backend = "opencv"
         self.is_running = True
         self._thread = Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
-        logger.info("Camera started (source=%s, %dx%d).", source, width, height)
+        logger.info(
+            "Camera started with OpenCV (requested=%s, opened=%s, backend=%s, %dx%d).",
+            source,
+            opened_source,
+            opened_backend,
+            width,
+            height,
+        )
 
     def _capture_loop(self):
-        while self.is_running and self.cap.isOpened():
+        while self.is_running:
+            if self._backend == "picamera2":
+                try:
+                    frame_rgb = self._picam.capture_array()
+                    frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                    with self._frame_lock:
+                        self._latest_frame = frame
+                except Exception:
+                    time.sleep(0.05)
+                continue
+
+            if self.cap is None or not self.cap.isOpened():
+                time.sleep(0.05)
+                continue
+
             ret, frame = self.cap.read()
             if ret:
                 # FIX: acquire lock before writing so get_frame() never reads
@@ -40,7 +144,7 @@ class Camera:
                 with self._frame_lock:
                     self._latest_frame = frame
             else:
-                time.sleep(0.1)
+                time.sleep(0.05)
 
     def get_frame(self):
         # FIX: acquire lock before reading
@@ -64,6 +168,17 @@ class Camera:
                 logger.warning("Camera thread did not stop within timeout.")
             self._thread = None
 
+        if self._backend == "picamera2" and self._picam is not None:
+            try:
+                self._picam.stop()
+            except Exception:
+                pass
+            try:
+                self._picam.close()
+            except Exception:
+                pass
+            self._picam = None
+
         if self.cap is not None:
             self.cap.release()
             self.cap = None
@@ -72,7 +187,11 @@ class Camera:
         with self._frame_lock:
             self._latest_frame = None
 
+        self._backend = None
+
         logger.info("Camera stopped.")
 
     def camera_available(self):
+        if self._backend == "picamera2":
+            return self._picam is not None and self.is_running
         return self.cap is not None and self.cap.isOpened()

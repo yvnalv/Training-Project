@@ -247,6 +247,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if msg.get("action") == "start_server_stream":
                         if not camera.is_running:
                             resolution = msg.get("resolution", "640x480")
+                            source = msg.get("source", 0)
                             try:
                                 width, height = map(int, resolution.split("x"))
                             except ValueError:
@@ -254,7 +255,13 @@ async def websocket_endpoint(websocket: WebSocket):
                                 logger.warning(
                                     "Invalid resolution '%s', using 640x480.", resolution
                                 )
-                            camera.start(0, width=width, height=height)
+                            if isinstance(source, str) and source.isdigit():
+                                source = int(source)
+                            try:
+                                camera.start(source, width=width, height=height)
+                            except Exception as e:
+                                logger.exception("Failed to start server camera.")
+                                await websocket.send_json({"mode": "server", "error": str(e)})
 
                     elif msg.get("action") == "stop_server_stream":
                         camera.stop()
