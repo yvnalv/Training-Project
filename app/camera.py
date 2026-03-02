@@ -23,6 +23,7 @@ class Camera:
         self._thread = None
         self._backend = None
         self._picam = None
+        self._picam_frame_is_rgb = False
         self._pi_hflip = True
         self._pi_vflip = True
 
@@ -72,9 +73,17 @@ class Camera:
         if source in (0, "0", "pi", "picam") and Picamera2 is not None:
             try:
                 self._picam = Picamera2()
-                config = self._picam.create_video_configuration(
-                    main={"size": (width, height), "format": "RGB888"}
-                )
+                self._picam_frame_is_rgb = False
+                try:
+                    config = self._picam.create_video_configuration(
+                        main={"size": (width, height), "format": "BGR888"}
+                    )
+                except Exception:
+                    config = self._picam.create_video_configuration(
+                        main={"size": (width, height), "format": "RGB888"}
+                    )
+                    self._picam_frame_is_rgb = True
+
                 self._picam.configure(config)
                 self._picam.start()
 
@@ -82,7 +91,12 @@ class Camera:
                 self.is_running = True
                 self._thread = Thread(target=self._capture_loop, daemon=True)
                 self._thread.start()
-                logger.info("Camera started with Picamera2 (%dx%d).", width, height)
+                logger.info(
+                    "Camera started with Picamera2 (%dx%d, format=%s).",
+                    width,
+                    height,
+                    "RGB888" if self._picam_frame_is_rgb else "BGR888",
+                )
                 return
             except Exception as e:
                 logger.warning("Picamera2 start failed, falling back to OpenCV: %s", e)
@@ -92,6 +106,7 @@ class Camera:
                 except Exception:
                     pass
                 self._picam = None
+                self._picam_frame_is_rgb = False
 
         self.cap, opened_source, opened_backend = self._open_opencv_capture(
             source, width, height
@@ -127,8 +142,9 @@ class Camera:
         while self.is_running:
             if self._backend == "picamera2":
                 try:
-                    frame_rgb = self._picam.capture_array()
-                    frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                    frame = self._picam.capture_array()
+                    if self._picam_frame_is_rgb:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
                     if self._pi_hflip and self._pi_vflip:
                         frame = cv2.flip(frame, -1)
@@ -188,6 +204,7 @@ class Camera:
             except Exception:
                 pass
             self._picam = None
+            self._picam_frame_is_rgb = False
 
         if self.cap is not None:
             self.cap.release()
