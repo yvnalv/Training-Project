@@ -23,6 +23,8 @@ class Camera:
         self._thread = None
         self._backend = None
         self._picam = None
+        self._pi_hflip = True
+        self._pi_vflip = True
 
     def _open_opencv_capture(self, source, width, height):
         numeric_source = source
@@ -127,6 +129,14 @@ class Camera:
                 try:
                     frame_rgb = self._picam.capture_array()
                     frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+
+                    if self._pi_hflip and self._pi_vflip:
+                        frame = cv2.flip(frame, -1)
+                    elif self._pi_hflip:
+                        frame = cv2.flip(frame, 1)
+                    elif self._pi_vflip:
+                        frame = cv2.flip(frame, 0)
+
                     with self._frame_lock:
                         self._latest_frame = frame
                 except Exception:
