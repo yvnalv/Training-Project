@@ -7,7 +7,13 @@
       "Bash(curl -k -s -o /dev/null -w \"%{http_code}\" https://192.168.100.16:8000/)",
       "Bash(curl -k -s https://192.168.100.16:8000/health)",
       "Bash(curl -k -s -o /dev/null -w \"GET /  → %{http_code}\\\\n\" https://192.168.100.16:8000/)",
-      "Bash(curl -k -s -w \"\\\\nGET /health → %{http_code}\\\\n\" https://192.168.100.16:8000/health)"
+      "Bash(curl -k -s -w \"\\\\nGET /health → %{http_code}\\\\n\" https://192.168.100.16:8000/health)",
+      "Bash(python -c \"import websockets\")",
+      "Bash(python -c \"import wsproto\")",
+      "Bash(pip install:*)",
+      "Bash(powershell -Command \"Stop-Process -Id 11632 -Force -ErrorAction SilentlyContinue\")",
+      "Bash(netstat -ano)",
+      "Bash(python -c ':*)"
     ]
   }
 }
