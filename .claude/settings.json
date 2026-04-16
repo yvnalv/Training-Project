@@ -13,7 +13,8 @@
       "Bash(pip install:*)",
       "Bash(powershell -Command \"Stop-Process -Id 11632 -Force -ErrorAction SilentlyContinue\")",
       "Bash(netstat -ano)",
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Bash(find app:*)"
     ]
   }
 }
