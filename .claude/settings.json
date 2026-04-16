@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import starlette; print\\('starlette:', starlette.__version__\\)\")",
+      "Bash(python -c \"import jinja2; print\\('jinja2:', jinja2.__version__\\)\")",
+      "Bash(powershell -Command \"Stop-Process -Id 10208 -Force -ErrorAction SilentlyContinue\")",
+      "Bash(curl -k -s -o /dev/null -w \"%{http_code}\" https://192.168.100.16:8000/)",
+      "Bash(curl -k -s https://192.168.100.16:8000/health)",
+      "Bash(curl -k -s -o /dev/null -w \"GET /  → %{http_code}\\\\n\" https://192.168.100.16:8000/)",
+      "Bash(curl -k -s -w \"\\\\nGET /health → %{http_code}\\\\n\" https://192.168.100.16:8000/health)"
+    ]
+  }
+}

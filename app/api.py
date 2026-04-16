@@ -63,7 +63,7 @@ def _compute_mpn(detections: list, total_count: int) -> dict:
 
 @router.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @router.get("/health")
