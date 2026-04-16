@@ -22,17 +22,36 @@ model = YOLO("best.pt")
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def suppress_duplicate_tubes(detections, x_thresh_ratio=0.4):
-    """
-    Removes duplicate detections that belong to the same physical tube
-    based on horizontal (x-axis) proximity.
-    Keeps the highest-confidence detection per tube.
+_MAX_TUBES = 9
 
-    NOTE: This is a single left-to-right sweep, so it only merges adjacent
-    duplicates. If three or more detections cluster together, the first pair
-    is merged but a straggler further right may still pass through. For the
-    typical 9-tube layout this has not been a problem in practice, but a
-    full grouping pass would be more robust if it becomes one.
+
+def _iou(a, b):
+    """Intersection-over-Union for two [x1, y1, x2, y2] boxes."""
+    ix1 = max(a[0], b[0])
+    iy1 = max(a[1], b[1])
+    ix2 = min(a[2], b[2])
+    iy2 = min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter == 0.0:
+        return 0.0
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    return inter / (area_a + area_b - inter)
+
+
+def suppress_duplicate_tubes(detections, iou_thresh=0.3, x_thresh_ratio=0.4):
+    """
+    Removes duplicate detections that belong to the same physical tube.
+
+    Uses a full greedy-NMS pass (highest confidence first) with two
+    suppression criteria:
+      1. IoU overlap > iou_thresh  — catches boxes that overlap in 2-D.
+      2. x-centre distance < avg_width * x_thresh_ratio — catches stacked
+         duplicates with little vertical overlap (e.g. label vs tube body).
+
+    Both criteria are checked so that 3+ clustered detections are always
+    collapsed to a single representative, regardless of how many there are.
+    The result is sorted left-to-right for consistent tube ordering.
     """
     if not detections:
         return []
@@ -41,26 +60,37 @@ def suppress_duplicate_tubes(detections, x_thresh_ratio=0.4):
     avg_width = sum(widths) / len(widths)
     x_thresh = avg_width * x_thresh_ratio
 
-    detections = sorted(detections, key=lambda d: d["bbox"][0])
-    filtered = []
+    # Process highest-confidence detections first
+    ranked = sorted(detections, key=lambda d: d["confidence"], reverse=True)
 
-    for det in detections:
-        cx = (det["bbox"][0] + det["bbox"][2]) / 2
+    kept = []
+    suppressed = set()
 
-        if not filtered:
-            filtered.append(det)
+    for i, det in enumerate(ranked):
+        if i in suppressed:
             continue
+        kept.append(det)
+        cx_i = (det["bbox"][0] + det["bbox"][2]) / 2
 
-        prev = filtered[-1]
-        prev_cx = (prev["bbox"][0] + prev["bbox"][2]) / 2
+        for j in range(i + 1, len(ranked)):
+            if j in suppressed:
+                continue
+            other = ranked[j]
+            cx_j = (other["bbox"][0] + other["bbox"][2]) / 2
+            if (
+                _iou(det["bbox"], other["bbox"]) > iou_thresh
+                or abs(cx_i - cx_j) < x_thresh
+            ):
+                suppressed.add(j)
 
-        if abs(cx - prev_cx) < x_thresh:
-            if det["confidence"] > prev["confidence"]:
-                filtered[-1] = det
-        else:
-            filtered.append(det)
+    # Hard cap: the physical rack always has exactly _MAX_TUBES tubes.
+    # If anything still slips through, keep only the top-confidence ones.
+    if len(kept) > _MAX_TUBES:
+        kept = sorted(kept, key=lambda d: d["confidence"], reverse=True)[:_MAX_TUBES]
 
-    return filtered
+    # Final left-to-right sort for correct tube ordering
+    kept.sort(key=lambda d: (d["bbox"][0] + d["bbox"][2]) / 2)
+    return kept
 
 
 def detections_to_tubes(detections):
@@ -68,13 +98,13 @@ def detections_to_tubes(detections):
     Convert ordered detections (left -> right) into 9 tube values (0/1).
 
     Rule:
-      Yellow_NoBubble -> 1 (positive)
+      Yellow_Bubble   -> 1 (positive)
       otherwise       -> 0 (negative)
 
     Raises:
         ValueError: if the number of detections is not exactly 9.
     """
-    tubes = [1 if d["label"] == "Yellow_NoBubble" else 0 for d in detections]
+    tubes = [1 if d["label"] == "Yellow_Bubble" else 0 for d in detections]
 
     if len(tubes) != 9:
         raise ValueError(f"Expected 9 tubes, got {len(tubes)}")
@@ -170,7 +200,7 @@ def run_inference_with_count(image_bytes: bytes, conf: float = 0.4):
     for det in detections:
         x1, y1, x2, y2 = map(int, det["bbox"])
 
-        if det["label"] == "Yellow_NoBubble":
+        if det["label"] == "Yellow_Bubble":
             label_text, color = "1", (0, 180, 0)
         else:
             label_text, color = "0", (120, 120, 120)
