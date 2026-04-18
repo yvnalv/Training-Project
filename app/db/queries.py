@@ -244,6 +244,35 @@ def export_csv() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+def get_all_settings() -> dict:
+    """Return all saved settings as a {key: value} dict."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        return {row["key"]: row["value"] for row in rows}
+    finally:
+        conn.close()
+
+
+def set_settings(data: dict) -> None:
+    """Upsert one or more settings key/value pairs."""
+    conn = get_connection()
+    try:
+        for key, value in data.items():
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 

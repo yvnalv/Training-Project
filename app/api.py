@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import importlib
 import json
 import logging
+import sys
 
 import cv2
 from fastapi import APIRouter, UploadFile, Form, Request, WebSocket, WebSocketDisconnect
@@ -16,6 +18,8 @@ from .db.queries import (
     count_predictions,
     delete_prediction,
     export_csv,
+    get_all_settings,
+    set_settings,
 )
 from .inference import detections_to_tubes, tubes_to_xyz
 from .mpn.mpn_lookup import lookup_mpn
@@ -199,6 +203,108 @@ async def delete_history_record(record_id: int):
         )
 
     return JSONResponse(content={"deleted": record_id})
+
+
+# ---------------------------------------------------------------------------
+# REST — settings (persist UI preferences to DB)
+# ---------------------------------------------------------------------------
+
+def _platform_info() -> dict:
+    """Return platform detection hints used by the frontend to pick defaults."""
+    is_linux = sys.platform.startswith("linux")
+    try:
+        importlib.import_module("picamera2")
+        has_picamera2 = True
+    except Exception:
+        has_picamera2 = False
+    return {
+        "is_raspi": is_linux and has_picamera2,
+        "has_picamera2": has_picamera2,
+        "default_camera_mode": "server" if has_picamera2 else "client",
+    }
+
+
+@router.get("/settings")
+async def get_settings_endpoint():
+    """
+    Return saved UI settings plus platform detection hints.
+
+    Response shape:
+        {
+            "is_raspi":            bool,
+            "has_picamera2":       bool,
+            "default_camera_mode": "client" | "server",
+            "settings":            { key: value, ... }
+        }
+    """
+    saved = get_all_settings()
+    return JSONResponse(content={**_platform_info(), "settings": saved})
+
+
+@router.put("/settings")
+async def put_settings_endpoint(request: Request):
+    """
+    Upsert UI settings. Accepts a JSON body of {key: value} pairs.
+    Only known setting keys are persisted; unknown keys are silently ignored.
+    """
+    ALLOWED_KEYS = {"cameraMode", "fps", "resolution", "confidence", "flipHorizontal"}
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON body."})
+
+    filtered = {k: v for k, v in body.items() if k in ALLOWED_KEYS}
+    set_settings(filtered)
+    return JSONResponse(content={"saved": list(filtered.keys())})
+
+
+# ---------------------------------------------------------------------------
+# REST — single-frame server camera capture (for upload analysis)
+# ---------------------------------------------------------------------------
+
+@router.get("/capture")
+async def capture_frame():
+    """
+    Capture one frame from the server-side camera (Pi Camera / USB webcam).
+    Returns {"image": "<base64 JPEG>"} or {"error": "..."} on failure.
+    Used by the frontend when camera source is set to 'server'.
+    """
+    cam = Camera()
+    try:
+        cam.start(source=0, width=640, height=480)
+
+        # Wait up to 3 s for the capture thread to produce a frame
+        frame = None
+        for _ in range(30):
+            frame = cam.get_frame()
+            if frame is not None:
+                break
+            await asyncio.sleep(0.1)
+
+        if frame is None:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Camera not ready — no frame captured within timeout."},
+            )
+
+        success, encoded = cv2.imencode(
+            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92]
+        )
+        if not success:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Failed to encode captured frame."},
+            )
+
+        img_b64 = base64.b64encode(encoded.tobytes()).decode("utf-8")
+        return JSONResponse(content={"image": img_b64})
+
+    except Exception as e:
+        logger.exception("capture_frame: error")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    finally:
+        cam.stop()
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ let state = {
     flipHorizontal: false,
     confidence: 0.25,
     isStreaming: false,
-    cameraMode: 'client' // 'client' | 'server'
+    cameraMode: 'client' // 'client' | 'server'  — overridden by loadSettings()
 };
 
 
@@ -55,6 +55,7 @@ function updateFpsDisplay(val) {
     if (state.isStreaming) {
         restartStreamInterval();
     }
+    saveSettings();
 }
 
 function updateConfDisplay(val) {
@@ -66,6 +67,7 @@ function updateConfDisplay(val) {
     if (state.isStreaming && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action: "set_conf", value: state.confidence }));
     }
+    saveSettings();
 }
 
 function setRotation(deg) {
@@ -91,10 +93,12 @@ function setRotation(deg) {
 
 document.getElementById('flipHorizontal').addEventListener('change', (e) => {
     state.flipHorizontal = e.target.checked;
+    saveSettings();
 });
 
 document.getElementById('resolutionSelect').addEventListener('change', (e) => {
     state.resolution = e.target.value;
+    saveSettings();
     if (state.isStreaming) {
         alert("Restarting camera to apply resolution change...");
         stopCamera();
@@ -104,6 +108,7 @@ document.getElementById('resolutionSelect').addEventListener('change', (e) => {
 
 document.getElementById('cameraSourceSelect').addEventListener('change', (e) => {
     state.cameraMode = e.target.value;
+    saveSettings();
     if (state.isStreaming) {
         stopCamera();
         alert("Camera source changed. Please click Start to resume.");
@@ -160,7 +165,42 @@ function closeSourceChoiceModal() {
 
 function sourceChooseCamera() {
     closeSourceChoiceModal();
-    openCameraCapture();
+    if (state.cameraMode === 'server') {
+        captureServerFrame();
+    } else {
+        openCameraCapture();
+    }
+}
+
+async function captureServerFrame() {
+    const p  = dropZone.querySelector('p');
+    const ic = dropZone.querySelector('i');
+    p.textContent  = 'Capturing from Pi Camera…';
+    ic.className   = 'fa-solid fa-spinner fa-spin';
+
+    try {
+        const response = await fetch('/capture');
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Server error: ${response.status}`);
+        }
+        const data = await response.json();
+
+        // Convert base64 string → Blob
+        const byteStr = atob(data.image);
+        const ab = new ArrayBuffer(byteStr.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+        const blob = new Blob([ab], { type: 'image/jpeg' });
+
+        p.textContent = 'Photo captured — analyzing…';
+        await _runPredict(blob);
+        ic.className = 'fa-solid fa-circle-plus'; // restore after predict
+    } catch (err) {
+        p.textContent = 'Click to choose camera or file';
+        ic.className  = 'fa-solid fa-circle-plus';
+        alert('Camera capture failed: ' + err.message);
+    }
 }
 
 function sourceChooseFile() {
@@ -1041,6 +1081,87 @@ function _patternToXyz(pattern) {
  * Render the full reference table into #guideTableBody.
  * Called once when the guideline view is first opened.
  */
+// ---------------------------------------------------------------------------
+// Settings persistence — load from / save to server DB
+// ---------------------------------------------------------------------------
+
+let _saveSettingsTimer = null;
+
+function saveSettings() {
+    // Debounce rapid slider changes — send after 600 ms of quiet
+    clearTimeout(_saveSettingsTimer);
+    _saveSettingsTimer = setTimeout(async () => {
+        try {
+            await fetch('/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cameraMode:     state.cameraMode,
+                    fps:            state.fps,
+                    resolution:     state.resolution,
+                    confidence:     state.confidence,
+                    flipHorizontal: state.flipHorizontal,
+                }),
+            });
+        } catch (e) {
+            console.warn('Could not save settings:', e);
+        }
+    }, 600);
+}
+
+async function loadSettings() {
+    try {
+        const res = await fetch('/settings');
+        if (!res.ok) return;
+        const data = await res.json();
+        const saved = data.settings || {};
+
+        // cameraMode: prefer saved value, fall back to platform default
+        const cm = saved.cameraMode || data.default_camera_mode || 'client';
+        state.cameraMode = cm;
+        const cmSel = document.getElementById('cameraSourceSelect');
+        if (cmSel) cmSel.value = cm;
+
+        // fps
+        if (saved.fps !== undefined) {
+            const fps = parseInt(saved.fps, 10);
+            state.fps = fps;
+            const fpsEl = document.getElementById('fpsRange');
+            if (fpsEl) { fpsEl.value = fps; updateFpsDisplay(fps); }
+        }
+
+        // resolution
+        if (saved.resolution) {
+            state.resolution = saved.resolution;
+            const resEl = document.getElementById('resolutionSelect');
+            if (resEl) resEl.value = saved.resolution;
+        }
+
+        // confidence
+        if (saved.confidence !== undefined) {
+            const conf = parseFloat(saved.confidence);
+            state.confidence = conf;
+            const confEl = document.getElementById('confRange');
+            if (confEl) { confEl.value = conf; updateConfDisplay(conf); }
+        }
+
+        // flipHorizontal
+        if (saved.flipHorizontal !== undefined) {
+            const flip = saved.flipHorizontal === 'true';
+            state.flipHorizontal = flip;
+            const flipEl = document.getElementById('flipHorizontal');
+            if (flipEl) flipEl.checked = flip;
+        }
+
+    } catch (e) {
+        console.warn('Could not load settings:', e);
+    }
+}
+
+// Load saved settings on page start
+loadSettings();
+
+
 function renderGuidelineTable() {
     const tbody = document.getElementById("guideTableBody");
     if (!tbody || tbody.dataset.rendered === "1") return; // render once only

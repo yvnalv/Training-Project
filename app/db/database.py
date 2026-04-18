@@ -55,6 +55,13 @@ _CREATE_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_created_at ON predictions (created_at DESC);
 """
 
+_CREATE_SETTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Connection helper
@@ -91,6 +98,7 @@ def init_db() -> None:
     try:
         conn.execute(_CREATE_TABLE)
         conn.execute(_CREATE_INDEX)
+        conn.execute(_CREATE_SETTINGS_TABLE)
         conn.commit()
         logger.info("Database ready at %s", DB_PATH)
     finally:
