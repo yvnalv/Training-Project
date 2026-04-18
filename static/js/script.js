@@ -115,10 +115,12 @@ document.getElementById('cameraSourceSelect').addEventListener('change', (e) => 
 // Upload logic
 // ---------------------------------------------------------------------------
 
-// On small screens (RPi LCD ≤ 800px) open the camera capture overlay instead
-// of the file picker. On desktop, use the normal file picker.
+// Detect Raspberry Pi by user agent: RPi Chromium reports "Linux armv7l" or
+// "Linux aarch64", whereas Android phones include "Android" and desktops use
+// x86_64. This avoids triggering camera mode on phones or other small screens.
 function _isRPi() {
-    return window.screen.width <= 800 || window.innerWidth <= 768;
+    const ua = navigator.userAgent;
+    return /Linux (armv7l|armv6l|aarch64)/.test(ua) && !/Android/i.test(ua);
 }
 
 const dropZone = document.getElementById('dropZone');
