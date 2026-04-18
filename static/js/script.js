@@ -125,11 +125,7 @@ function _isRPi() {
 
 const dropZone = document.getElementById('dropZone');
 dropZone.addEventListener('click', () => {
-    if (_isRPi()) {
-        openSourceChoiceModal();
-    } else {
-        document.getElementById('fileInput').click();
-    }
+    openSourceChoiceModal();
 });
 dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
 dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--border)'; });
@@ -273,7 +269,7 @@ async function _runPredict(blob) {
         updateMpnDisplay(data, 'mpnPattern', 'mpnValue', 'mpnCI', 'mpnRisk', 'mpnRiskItem');
 
         uploadResults.style.display = 'block';
-        dropZone.querySelector('p').textContent = _isRPi() ? 'Tap to choose camera or file' : 'Drag & drop or click to upload';
+        dropZone.querySelector('p').textContent = 'Click to choose camera or file';
     } catch (err) {
         alert("Error: " + err.message);
         console.error(err);
@@ -1032,12 +1028,11 @@ function _patternToXyz(pattern) {
     return digits.split("").join("-");
 }
 
-// On RPi: update the upload zone hint text and icon to reflect touch mode.
+// Update upload zone hint text and icon to reflect the choice modal.
 (function initUploadZoneHint() {
-    if (!_isRPi()) return;
     const p  = dropZone.querySelector('p');
     const ic = dropZone.querySelector('i');
-    if (p)  p.textContent = 'Tap to choose camera or file';
+    if (p)  p.textContent = 'Click to choose camera or file';
     if (ic) { ic.className = 'fa-solid fa-circle-plus'; }
 })();
 

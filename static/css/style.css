@@ -1624,12 +1624,25 @@ tbody tr:hover td { background: var(--bg-hover); }
 }
 
 /* ── Camera Capture Overlay (RPi upload mode) ────────────── */
+/* These overlays are toggled via style.display, not the .open class,
+   so we must override .modal-overlay's opacity:0 / pointer-events:none. */
+#cameraCapture,
+#sourceChoiceModal {
+  opacity: 1;
+  pointer-events: all;
+}
+
 #cameraCapture {
   display: none;
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.92);
   z-index: 300;
+}
+
+#sourceChoiceModal {
+  display: none;
+  z-index: 400;
 }
 
 .capture-box {
