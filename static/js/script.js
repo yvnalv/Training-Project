@@ -126,7 +126,7 @@ function _isRPi() {
 const dropZone = document.getElementById('dropZone');
 dropZone.addEventListener('click', () => {
     if (_isRPi()) {
-        openCameraCapture();
+        openSourceChoiceModal();
     } else {
         document.getElementById('fileInput').click();
     }
@@ -148,6 +148,28 @@ function handleFile(file) {
     dataTransfer.items.add(file);
     document.getElementById('fileInput').files = dataTransfer.files;
     dropZone.querySelector('p').textContent = `Selected: ${file.name}`;
+}
+
+// ---------------------------------------------------------------------------
+// Source choice modal (RPi only) — camera vs file explorer
+// ---------------------------------------------------------------------------
+
+function openSourceChoiceModal() {
+    document.getElementById('sourceChoiceModal').style.display = 'flex';
+}
+
+function closeSourceChoiceModal() {
+    document.getElementById('sourceChoiceModal').style.display = 'none';
+}
+
+function sourceChooseCamera() {
+    closeSourceChoiceModal();
+    openCameraCapture();
+}
+
+function sourceChooseFile() {
+    closeSourceChoiceModal();
+    document.getElementById('fileInput').click();
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +273,7 @@ async function _runPredict(blob) {
         updateMpnDisplay(data, 'mpnPattern', 'mpnValue', 'mpnCI', 'mpnRisk', 'mpnRiskItem');
 
         uploadResults.style.display = 'block';
-        dropZone.querySelector('p').textContent = _isRPi() ? 'Tap to take a photo' : 'Drag & drop or click to upload';
+        dropZone.querySelector('p').textContent = _isRPi() ? 'Tap to choose camera or file' : 'Drag & drop or click to upload';
     } catch (err) {
         alert("Error: " + err.message);
         console.error(err);
@@ -1010,13 +1032,13 @@ function _patternToXyz(pattern) {
     return digits.split("").join("-");
 }
 
-// On RPi: update the upload zone hint text and icon to reflect camera mode.
+// On RPi: update the upload zone hint text and icon to reflect touch mode.
 (function initUploadZoneHint() {
     if (!_isRPi()) return;
     const p  = dropZone.querySelector('p');
     const ic = dropZone.querySelector('i');
-    if (p)  p.textContent = 'Tap to take a photo';
-    if (ic) { ic.className = 'fa-solid fa-camera'; }
+    if (p)  p.textContent = 'Tap to choose camera or file';
+    if (ic) { ic.className = 'fa-solid fa-circle-plus'; }
 })();
 
 
