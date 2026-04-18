@@ -115,8 +115,20 @@ document.getElementById('cameraSourceSelect').addEventListener('change', (e) => 
 // Upload logic
 // ---------------------------------------------------------------------------
 
+// On small screens (RPi LCD ≤ 800px) open the camera capture overlay instead
+// of the file picker. On desktop, use the normal file picker.
+function _isRPi() {
+    return window.screen.width <= 800 || window.innerWidth <= 768;
+}
+
 const dropZone = document.getElementById('dropZone');
-dropZone.addEventListener('click', () => document.getElementById('fileInput').click());
+dropZone.addEventListener('click', () => {
+    if (_isRPi()) {
+        openCameraCapture();
+    } else {
+        document.getElementById('fileInput').click();
+    }
+});
 dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
 dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--border)'; });
 dropZone.addEventListener('drop', (e) => {
@@ -136,16 +148,79 @@ function handleFile(file) {
     dropZone.querySelector('p').textContent = `Selected: ${file.name}`;
 }
 
+// ---------------------------------------------------------------------------
+// Camera capture overlay (RPi upload mode)
+// ---------------------------------------------------------------------------
+
+let _captureStream = null;
+
+async function openCameraCapture() {
+    const overlay = document.getElementById('cameraCapture');
+    const video   = document.getElementById('captureVideo');
+
+    overlay.style.display = 'flex';
+
+    try {
+        _captureStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        });
+        video.srcObject = _captureStream;
+    } catch (err) {
+        closeCameraCapture();
+        alert('Camera not available: ' + err.message);
+    }
+}
+
+function closeCameraCapture() {
+    const overlay = document.getElementById('cameraCapture');
+    const video   = document.getElementById('captureVideo');
+
+    overlay.style.display = 'none';
+    video.srcObject = null;
+
+    if (_captureStream) {
+        _captureStream.getTracks().forEach(t => t.stop());
+        _captureStream = null;
+    }
+}
+
+function capturePhoto() {
+    const video    = document.getElementById('captureVideo');
+    const canvas   = document.getElementById('captureCanvas');
+    const captureBtn = document.getElementById('captureBtn');
+
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    captureBtn.disabled = true;
+
+    canvas.toBlob(async (blob) => {
+        closeCameraCapture();
+        dropZone.querySelector('p').textContent = 'Photo captured — analyzing…';
+        captureBtn.disabled = false;
+        await _runPredict(blob);
+    }, 'image/jpeg', 0.92);
+}
+
+// ---------------------------------------------------------------------------
+// Core prediction runner — accepts a File (desktop) or Blob (RPi capture)
+// ---------------------------------------------------------------------------
+
 async function uploadImage() {
     const fileInput = document.getElementById('fileInput');
     const file = fileInput.files[0];
     if (!file) return alert("Please select an image first.");
+    await _runPredict(file);
+}
 
-    const btn = document.getElementById('predictBtn');
-    const loading = document.getElementById('loading');
+async function _runPredict(blob) {
+    const btn          = document.getElementById('predictBtn');
+    const loading      = document.getElementById('loading');
     const uploadResults = document.getElementById('uploadResults');
-    const resultImage = document.getElementById('resultImage');
-    const tableBody = document.getElementById('tableBody');
+    const resultImage  = document.getElementById('resultImage');
+    const tableBody    = document.getElementById('tableBody');
 
     btn.disabled = true;
     loading.style.display = 'block';
@@ -155,8 +230,8 @@ async function uploadImage() {
     if (tableBody) tableBody.innerHTML = '';
 
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('conf', state.confidence); // FIX: send confidence so backend uses it
+    formData.append('file', blob, 'capture.jpg');
+    formData.append('conf', state.confidence);
 
     try {
         const response = await fetch('/predict', { method: 'POST', body: formData });
@@ -174,6 +249,7 @@ async function uploadImage() {
         updateMpnDisplay(data, 'mpnPattern', 'mpnValue', 'mpnCI', 'mpnRisk', 'mpnRiskItem');
 
         uploadResults.style.display = 'block';
+        dropZone.querySelector('p').textContent = _isRPi() ? 'Tap to take a photo' : 'Drag & drop or click to upload';
     } catch (err) {
         alert("Error: " + err.message);
         console.error(err);
@@ -931,6 +1007,16 @@ function _patternToXyz(pattern) {
     const digits = pattern.replace("P", "");
     return digits.split("").join("-");
 }
+
+// On RPi: update the upload zone hint text and icon to reflect camera mode.
+(function initUploadZoneHint() {
+    if (!_isRPi()) return;
+    const p  = dropZone.querySelector('p');
+    const ic = dropZone.querySelector('i');
+    if (p)  p.textContent = 'Tap to take a photo';
+    if (ic) { ic.className = 'fa-solid fa-camera'; }
+})();
+
 
 /**
  * Render the full reference table into #guideTableBody.

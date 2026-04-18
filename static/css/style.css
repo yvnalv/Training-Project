@@ -1622,3 +1622,44 @@ tbody tr:hover td { background: var(--bg-hover); }
   .history-risk-badge { font-size: 0.58rem; padding: 1px 6px; }
   .summary-item.risk-item .summary-value { font-size: 0.7rem; }
 }
+
+/* ── Camera Capture Overlay (RPi upload mode) ────────────── */
+#cameraCapture {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+  z-index: 300;
+}
+
+.capture-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 720px;
+  padding: 16px;
+}
+
+#captureVideo {
+  width: 100%;
+  max-height: 60vh;
+  border-radius: 10px;
+  background: #000;
+  object-fit: cover;
+}
+
+.capture-controls {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  width: 100%;
+}
+
+.capture-controls .btn {
+  flex: 1;
+  max-width: 200px;
+  padding: 14px 0;
+  font-size: 1rem;
+}
