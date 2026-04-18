@@ -73,16 +73,14 @@ class Camera:
         if source in (0, "0", "pi", "picam") and Picamera2 is not None:
             try:
                 self._picam = Picamera2()
-                self._picam_frame_is_rgb = False
-                try:
-                    config = self._picam.create_video_configuration(
-                        main={"size": (width, height), "format": "BGR888"}
-                    )
-                except Exception:
-                    config = self._picam.create_video_configuration(
-                        main={"size": (width, height), "format": "RGB888"}
-                    )
-                    self._picam_frame_is_rgb = True
+                # Always request RGB888 — it is universally supported by all
+                # Pi camera modules and libcamera versions.  BGR888 is
+                # hardware-dependent and on some configurations delivers data
+                # in RGB byte order despite the name, causing blue↔red swaps.
+                self._picam_frame_is_rgb = True
+                config = self._picam.create_video_configuration(
+                    main={"size": (width, height), "format": "RGB888"}
+                )
 
                 self._picam.configure(config)
                 self._picam.start()
@@ -92,10 +90,9 @@ class Camera:
                 self._thread = Thread(target=self._capture_loop, daemon=True)
                 self._thread.start()
                 logger.info(
-                    "Camera started with Picamera2 (%dx%d, format=%s).",
+                    "Camera started with Picamera2 (%dx%d, format=RGB888).",
                     width,
                     height,
-                    "RGB888" if self._picam_frame_is_rgb else "BGR888",
                 )
                 return
             except Exception as e:
@@ -143,6 +140,10 @@ class Camera:
             if self._backend == "picamera2":
                 try:
                     frame = self._picam.capture_array()
+                    # Drop alpha/padding channel if camera returns 4-channel data
+                    # (some libcamera builds return XRGB/RGBA even for RGB888)
+                    if frame.ndim == 3 and frame.shape[2] == 4:
+                        frame = frame[:, :, :3]
                     if self._picam_frame_is_rgb:
                         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
