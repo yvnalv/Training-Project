@@ -35,7 +35,27 @@ If no network is connected, the URL falls back to `https://localhost:8000`.
 
 ---
 
-## First-Time Setup
+## Running Manually
+
+If autostart is not yet set up, or you want to start VialVision without rebooting:
+
+```bash
+bash /home/pi/yvnalv/projects/Training-Project/scripts/rpi_autostart.sh
+```
+
+This does the full sequence: starts the server, detects the IP, waits for it to be ready, then opens Chromium fullscreen.
+
+To start just the server (no browser):
+
+```bash
+cd /home/pi/yvnalv/projects/Training-Project
+source ../vialvisionenv/bin/activate
+bash scripts/rpi_start_server.sh
+```
+
+---
+
+## First-Time Setup (Autostart on Boot)
 
 Run this **once** on the Raspberry Pi from the project root:
 
@@ -46,14 +66,33 @@ bash scripts/rpi_setup_autostart.sh
 This script:
 1. Makes all scripts executable (`chmod +x`)
 2. Converts Windows CRLF line endings to Unix LF (`dos2unix` or `sed` fallback)
-3. Copies `scripts/vialvision.desktop` to `~/.config/autostart/vialvision.desktop`
-4. Creates an empty `server.log` file
+3. Copies `scripts/vialvision.desktop` to `~/.config/autostart/` (XDG method)
+4. Adds a `vialvision` entry to `~/.config/wayfire.ini` under `[autostart]` (Wayfire-native method — more reliable)
+5. Creates an empty `server.log` file
 
 Then reboot to test:
 
 ```bash
 sudo reboot
 ```
+
+### Why two methods?
+
+- **Wayfire `[autostart]` in `wayfire.ini`** — The most reliable method on Wayfire. Wayfire reads this file directly at compositor startup.
+- **XDG `.desktop` in `~/.config/autostart/`** — The standard cross-desktop fallback. Works if the `xdg-autostart` plugin is enabled in Wayfire.
+
+The setup script installs both so at least one will work.
+
+### Manual Wayfire config (if setup script didn't work)
+
+Check your `~/.config/wayfire.ini` and ensure it has:
+
+```ini
+[autostart]
+vialvision = /bin/bash /home/pi/yvnalv/projects/Training-Project/scripts/rpi_autostart.sh
+```
+
+If the `[autostart]` section already exists, just add the `vialvision =` line under it.
 
 ---
 

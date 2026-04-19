@@ -8,6 +8,7 @@ set -e
 
 PROJECT_DIR="/home/pi/yvnalv/projects/Training-Project"
 AUTOSTART_DIR="/home/pi/.config/autostart"
+WAYFIRE_INI="/home/pi/.config/wayfire.ini"
 
 echo "=== VialVision autostart setup ==="
 
@@ -32,12 +33,34 @@ else
     echo "✓ Line endings converted (sed fallback)."
 fi
 
-# ── 3. Install the XDG autostart entry ────────────────────────────
+# ── 3. Install the XDG autostart entry (fallback method) ──────────
 mkdir -p "$AUTOSTART_DIR"
 cp "$PROJECT_DIR/scripts/vialvision.desktop" "$AUTOSTART_DIR/vialvision.desktop"
-echo "✓ Autostart entry installed to $AUTOSTART_DIR/vialvision.desktop"
+echo "✓ XDG autostart entry installed to $AUTOSTART_DIR/vialvision.desktop"
 
-# ── 4. Create an empty log file so it is always writable ──────────
+# ── 4. Register with Wayfire directly (primary method) ────────────
+# Wayfire reads [autostart] entries from ~/.config/wayfire.ini at login.
+# This is more reliable than XDG autostart on Wayfire/Wayland.
+if [ -f "$WAYFIRE_INI" ]; then
+    # Remove any previous vialvision entry to avoid duplicates
+    sed -i '/^vialvision\s*=/d' "$WAYFIRE_INI"
+
+    # Append under [autostart] section if it exists, else add the section
+    if grep -q '^\[autostart\]' "$WAYFIRE_INI"; then
+        sed -i '/^\[autostart\]/a vialvision = /bin/bash '"$PROJECT_DIR"'/scripts/rpi_autostart.sh' "$WAYFIRE_INI"
+        echo "✓ Wayfire autostart entry added to existing [autostart] section."
+    else
+        printf '\n[autostart]\nvialvision = /bin/bash %s/scripts/rpi_autostart.sh\n' "$PROJECT_DIR" >> "$WAYFIRE_INI"
+        echo "✓ Wayfire [autostart] section created and entry added."
+    fi
+else
+    echo "⚠ $WAYFIRE_INI not found — only XDG autostart installed."
+    echo "  If Wayfire autostart still does not work, manually add to wayfire.ini:"
+    echo "  [autostart]"
+    echo "  vialvision = /bin/bash $PROJECT_DIR/scripts/rpi_autostart.sh"
+fi
+
+# ── 5. Create an empty log file so it is always writable ──────────
 touch "$PROJECT_DIR/server.log"
 echo "✓ Log file ready: $PROJECT_DIR/server.log"
 

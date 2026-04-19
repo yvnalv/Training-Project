@@ -64,6 +64,7 @@ fi
 "$CHROMIUM_CMD" \
     --start-fullscreen \
     --ignore-certificate-errors \
+    --test-type \
     --disable-restore-session-state \
     --noerrdialogs \
     --disable-infobars \
