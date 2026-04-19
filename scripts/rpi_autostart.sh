@@ -3,7 +3,7 @@
 # Launched at login by the XDG autostart entry (vialvision.desktop).
 # Steps:
 #   1. Wait for the desktop environment to fully initialise.
-#   2. Start the uvicorn server in the background (logs → server.log).
+#   2. Open a terminal window and run the server inside it (visible output).
 #   3. Detect the connected network IP; fall back to localhost.
 #   4. Poll until the server is accepting HTTPS connections.
 #   5. Open Chromium in full-screen at the correct URL.
@@ -14,15 +14,16 @@ LOG_FILE="$PROJECT_DIR/server.log"
 # ── 1. Give the Wayfire compositor time to finish starting ───────
 sleep 8
 
-# ── 2. Start server in background, all output → server.log ───────
-echo "--- VialVision boot $(date) ---" >> "$LOG_FILE"
-bash "$PROJECT_DIR/scripts/rpi_start_server.sh" >> "$LOG_FILE" 2>&1 &
-SERVER_PID=$!
-echo "Server PID: $SERVER_PID" >> "$LOG_FILE"
+# ── 2. Open a visible terminal running the server ────────────────
+# The terminal stays open so you can see all server output.
+# If the server stops or crashes the terminal shows the error and waits.
+echo "--- VialVision boot $(date) ---" > "$LOG_FILE"
+
+lxterminal \
+    --title="VialVision Server" \
+    -e "bash -c 'bash \"$PROJECT_DIR/scripts/rpi_start_server.sh\"; echo \"\"; echo \"=== Server stopped. Press Enter to close. ===\"; read'" &
 
 # ── 3. Resolve target URL ─────────────────────────────────────────
-# hostname -I returns all interface IPs space-separated; take the first
-# non-loopback one (WiFi or Ethernet).
 IP=$(hostname -I 2>/dev/null | awk '{print $1}' | tr -d '[:space:]')
 
 if [ -n "$IP" ]; then
@@ -49,8 +50,6 @@ if [ "$READY" -eq 0 ]; then
 fi
 
 # ── 5. Open Chromium in full-screen ──────────────────────────────
-# Try chromium-browser first (standard name on Raspberry Pi OS),
-# fall back to 'chromium' if not found.
 CHROMIUM_CMD=""
 if command -v chromium-browser &> /dev/null; then
     CHROMIUM_CMD="chromium-browser"
@@ -68,4 +67,4 @@ fi
     --disable-restore-session-state \
     --noerrdialogs \
     --disable-infobars \
-    "$URL" >> "$LOG_FILE" 2>&1
+    "$URL"

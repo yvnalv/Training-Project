@@ -7,7 +7,7 @@
 set -e
 
 PROJECT_DIR="/home/pi/yvnalv/projects/Training-Project"
-VENV_ACTIVATE="/home/pi/yvnalv/vialvisionenv/bin/activate"
+VENV_ACTIVATE="/home/pi/yvnalv/projects/bin/activate"
 
 cd "$PROJECT_DIR"
 source "$VENV_ACTIVATE"
