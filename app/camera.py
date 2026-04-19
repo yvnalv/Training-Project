@@ -5,6 +5,7 @@ import sys
 from threading import Thread, Lock
 
 import cv2
+import numpy as np
 
 try:
     Picamera2 = importlib.import_module("picamera2").Picamera2
@@ -139,13 +140,15 @@ class Camera:
         while self.is_running:
             if self._backend == "picamera2":
                 try:
-                    frame = self._picam.capture_array()
-                    # Drop alpha/padding channel if camera returns 4-channel data
-                    # (some libcamera builds return XRGB/RGBA even for RGB888)
-                    if frame.ndim == 3 and frame.shape[2] == 4:
-                        frame = frame[:, :, :3]
-                    if self._picam_frame_is_rgb:
-                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    # capture_image() returns a PIL Image in standard RGB —
+                    # it is format-agnostic and works correctly on every Pi
+                    # camera module regardless of libcamera format quirks.
+                    pil_frame = self._picam.capture_image("main")
+                    # Ensure RGB mode (handles rare RGBA output)
+                    if pil_frame.mode != "RGB":
+                        pil_frame = pil_frame.convert("RGB")
+                    # Convert RGB → BGR for OpenCV convention
+                    frame = cv2.cvtColor(np.array(pil_frame), cv2.COLOR_RGB2BGR)
 
                     if self._pi_hflip and self._pi_vflip:
                         frame = cv2.flip(frame, -1)

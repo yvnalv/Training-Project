@@ -1,9 +1,12 @@
 import asyncio
 import base64
 import importlib
+import io
 import json
 import logging
 import sys
+
+from PIL import Image as _PIL_Image
 
 import cv2
 from fastapi import APIRouter, UploadFile, Form, Request, WebSocket, WebSocketDisconnect
@@ -287,16 +290,14 @@ async def capture_frame():
                 content={"error": "Camera not ready — no frame captured within timeout."},
             )
 
-        success, encoded = cv2.imencode(
-            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92]
-        )
-        if not success:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Failed to encode captured frame."},
-            )
-
-        img_b64 = base64.b64encode(encoded.tobytes()).decode("utf-8")
+        # Convert BGR (OpenCV) → RGB (PIL) and encode as JPEG with PIL.
+        # Using PIL end-to-end avoids any BGR/RGB confusion that can occur
+        # when cv2.imencode's libjpeg binding handles channel order on ARM.
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_img = _PIL_Image.fromarray(frame_rgb)
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=92)
+        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
         return JSONResponse(content={"image": img_b64})
 
     except Exception as e:
