@@ -276,7 +276,7 @@ async def capture_frame():
     try:
         cam.start(source=0, width=640, height=480)
 
-        # Wait up to 3 s for the capture thread to produce a frame
+        # Phase 1 — wait up to 3 s for the capture thread to produce any frame
         frame = None
         for _ in range(30):
             frame = cam.get_frame()
@@ -289,6 +289,12 @@ async def capture_frame():
                 status_code=503,
                 content={"error": "Camera not ready — no frame captured within timeout."},
             )
+
+        # Phase 2 — let the camera fully stabilise: autofocus locks on the
+        # subject, auto-exposure finds the right level, and any initial
+        # colour-balance transients settle.  2 s is enough for CM2/CM3.
+        await asyncio.sleep(2.0)
+        frame = cam.get_frame()  # grab the now-stable frame
 
         # Convert BGR (OpenCV) → RGB (PIL) and encode as JPEG with PIL.
         # Using PIL end-to-end avoids any BGR/RGB confusion that can occur

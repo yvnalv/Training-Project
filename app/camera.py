@@ -86,6 +86,35 @@ class Camera:
                 self._picam.configure(config)
                 self._picam.start()
 
+                # ── Field-of-view: use the full sensor pixel array so the
+                #    camera is not digitally zoomed in.  This is the widest
+                #    possible crop and effectively "zooms out" the image.
+                try:
+                    full_res = self._picam.camera_properties.get("PixelArraySize")
+                    if full_res and len(full_res) == 2:
+                        self._picam.set_controls({
+                            "ScalerCrop": (0, 0, full_res[0], full_res[1])
+                        })
+                        logger.info("ScalerCrop set to full sensor %dx%d.", *full_res)
+                except Exception as _e:
+                    logger.debug("ScalerCrop not applied: %s", _e)
+
+                # ── Sharpness: raise above the 1.0 default to compensate for
+                #    the close capture distance and any sensor softness.
+                try:
+                    self._picam.set_controls({"Sharpness": 4.0})
+                except Exception:
+                    pass
+
+                # ── Autofocus (Camera Module 3 only): continuous AF keeps the
+                #    image in focus at close range.  CM1/CM2 have fixed focus
+                #    so this control is silently ignored on those modules.
+                try:
+                    self._picam.set_controls({"AfMode": 2})  # 2 = Continuous
+                    logger.info("Continuous autofocus enabled.")
+                except Exception:
+                    pass
+
                 self._backend = "picamera2"
                 self.is_running = True
                 self._thread = Thread(target=self._capture_loop, daemon=True)
