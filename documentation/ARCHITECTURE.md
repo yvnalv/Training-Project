@@ -39,6 +39,9 @@ All HTTP routes and the WebSocket endpoint.
 |---|---|---|
 | `/` | GET | Renders `index.html` home page |
 | `/health` | GET | Returns `{"status": "ok", "model": "best.pt"}` |
+| `/settings` | GET | Returns saved settings + platform info + network IP |
+| `/settings` | PUT | Upserts UI settings to the database |
+| `/capture` | GET | Captures a single still image from the server-side camera |
 | `/predict` | POST | Accepts image upload, runs inference, saves to DB |
 | `/history` | GET | Paginated history (params: `limit`, `offset`) |
 | `/history/export` | GET | Streams all records as a CSV download |
@@ -100,9 +103,15 @@ Camera abstraction that works on both Raspberry Pi and desktop.
 1. `picamera2` — preferred on Raspberry Pi (native driver, low latency)
 2. OpenCV — fallback for USB cameras on any platform
 
+**Backend priority:**
+1. `picamera2` — preferred on Raspberry Pi; always requests `RGB888` format (reliable across all Pi camera modules); uses `capture_image("main")` which returns a PIL Image with guaranteed RGB channel order
+2. OpenCV — fallback for USB cameras on any platform
+
 **Key behaviors:**
 - Capture runs in a background thread, continuously updating a shared frame buffer with a Lock for thread safety
-- Supports rotation and horizontal flip transforms (configured from frontend settings)
+- `picamera2` path: `capture_image("main")` → PIL Image (RGB) → `cv2.cvtColor(RGB→BGR)` → stored as BGR for OpenCV convention
+- Camera controls applied on start (picamera2): `ScalerCrop` to full sensor (maximum FOV), `Sharpness=4.0`, `AfMode=2` (continuous AF, CM3 only)
+- Supports horizontal and vertical flip transforms (configured from frontend settings)
 - `get_frame()` returns the latest frame (thread-safe read)
 - `stop()` signals the thread and joins with a 2-second timeout
 
@@ -113,6 +122,11 @@ SQLite setup and lifecycle management.
 
 **Schema:**
 ```sql
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE predictions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -146,6 +160,8 @@ All database operations.
 | `count_predictions()` | Returns total record count |
 | `delete_prediction(id)` | Deletes DB row and image file, returns True/False |
 | `export_csv()` | Returns all records as a CSV string |
+| `get_all_settings()` | Returns all settings as `{key: value}` dict |
+| `set_settings(data)` | Upserts each key via `INSERT … ON CONFLICT DO UPDATE` |
 
 ---
 
@@ -238,9 +254,15 @@ The frontend is a single-page app (SPA) with no external JS framework.
   flipHorizontal: false,
   confidence: 0.25,
   isStreaming: false,
-  cameraMode: 'client' | 'server'
+  cameraMode: 'client' | 'server'   // default overridden by loadSettings()
 }
 ```
+
+**Settings persistence:**
+- `loadSettings()` is called on page load; fetches `GET /settings` and applies saved values
+- `default_camera_mode` from the server overrides the JS default (platform-aware: `"server"` on Pi, `"client"` on Windows/Mac)
+- `saveSettings()` is debounced 600 ms and wired to all 5 settings change handlers
+- Network IP from `GET /settings` is displayed in the Settings view (`#networkIp`)
 
 **Navigation:** `navigateTo(view)` toggles `.active` on `<section>` views and nav items.
 
@@ -254,6 +276,37 @@ The frontend is a single-page app (SPA) with no external JS framework.
 - `loadHistory()` fetches `/history?limit=20&offset=0`
 - `renderHistoryCard()` builds card DOM with delete + modal open
 - `openHistoryModal()` calls `/history/{id}` (actually uses cached data) and renders detail view
+
+---
+
+---
+
+## Raspberry Pi Autostart
+
+On Raspberry Pi OS Trixie (Debian 13 / Wayfire compositor), the app auto-starts at desktop login using the XDG autostart mechanism.
+
+**Scripts in `scripts/`:**
+
+| File | Role |
+|---|---|
+| `rpi_start_server.sh` | Activates venv, starts uvicorn HTTPS server |
+| `rpi_autostart.sh` | Boot orchestrator: sleep → start server → detect IP → poll → open Chromium |
+| `vialvision.desktop` | XDG autostart entry installed to `~/.config/autostart/` |
+| `rpi_setup_autostart.sh` | One-time setup script (chmod, dos2unix, install .desktop) |
+
+**Boot sequence:**
+```
+Desktop login
+     │
+~/.config/autostart/vialvision.desktop
+     │
+rpi_autostart.sh
+  ├─ sleep 8          (wait for Wayfire)
+  ├─ rpi_start_server.sh &   (uvicorn in background → server.log)
+  ├─ hostname -I      (detect LAN IP)
+  ├─ curl -k poll     (wait up to 90 s for server ready)
+  └─ chromium-browser --start-fullscreen https://$IP:8000
+```
 
 ---
 

@@ -1,71 +1,145 @@
 # Raspberry Pi Autostart Guide
 
-To run your YOLO demo automatically when the Raspberry Pi starts, the best method is to use a **systemd service**.
+This guide covers how VialVision automatically starts the server and opens Chromium in fullscreen when the Raspberry Pi boots.
 
-## 1. Create the Service File
+> **Target OS:** Raspberry Pi OS Trixie (Debian 13) with Wayfire compositor
+> **User:** `pi`
+> **Project path:** `/home/pi/yvnalv/projects/Training-Project`
+> **Venv path:** `/home/pi/yvnalv/vialvisionenv`
 
-Create a file named `yolo-demo.service` on your Raspberry Pi:
+---
+
+## How It Works
+
+VialVision uses the **XDG autostart** mechanism — a `.desktop` file placed in `~/.config/autostart/`.
+Wayfire (the Wayland compositor used on RPi OS Trixie) reads this directory at login and launches the entry automatically.
+
+> **Note:** The older systemd service approach (documented in earlier versions) only started the server but could not open a browser window in the desktop session. XDG autostart runs inside the desktop session and can launch Chromium directly.
+
+### Boot sequence
+
+```
+Desktop login
+     │
+~/.config/autostart/vialvision.desktop  ← registered by setup script
+     │
+scripts/rpi_autostart.sh
+  ├─ sleep 8               ← wait for Wayfire to fully initialize
+  ├─ rpi_start_server.sh & ← uvicorn HTTPS server in background → server.log
+  ├─ hostname -I           ← detect LAN IP (e.g. 192.168.1.42)
+  ├─ curl -k poll          ← wait up to 90 s for server to accept connections
+  └─ chromium-browser --start-fullscreen https://<IP>:8000
+```
+
+If no network is connected, the URL falls back to `https://localhost:8000`.
+
+---
+
+## First-Time Setup
+
+Run this **once** on the Raspberry Pi from the project root:
 
 ```bash
-sudo nano /etc/systemd/system/yolo-demo.service
+bash scripts/rpi_setup_autostart.sh
 ```
 
-Paste the following content into it. **IMPORTANT**: You must update the paths to match where you actually copied the files on your Pi.
+This script:
+1. Makes all scripts executable (`chmod +x`)
+2. Converts Windows CRLF line endings to Unix LF (`dos2unix` or `sed` fallback)
+3. Copies `scripts/vialvision.desktop` to `~/.config/autostart/vialvision.desktop`
+4. Creates an empty `server.log` file
 
-```ini
-[Unit]
-Description=YOLO Demo FastAPI Server
-After=network.target
-
-[Service]
-# Change 'pi' to your username if different
-User=pi
-Group=pi
-
-# UPDATE THIS: The directory where you put the project files
-WorkingDirectory=/home/pi/yvnalv/projects/Training-Project
-
-# UPDATE THIS: Path to your python environment
-# If you are NOT using a virtual environment, you can remove the Environment line 
-# and just use /usr/bin/python3
-Environment="PATH=/home/pi/yvnalv/projects/testtube/bin:/usr/local/bin:/usr/bin:/bin"
-
-# The command to run
-# Make sure 'uvicorn' is in the path or use the full path to it
-ExecStart=/home/pi/yvnalv/projects/testtube/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-
-# Auto-restart if it crashes
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## 2. Enable and Start the Service
-
-Run these commands to register the service and start it:
+Then reboot to test:
 
 ```bash
-# Reload systemd to read the new file
-sudo systemctl daemon-reload
-
-# Enable the service to start on boot
-sudo systemctl enable yolo-demo.service
-
-# Start the service immediately
-sudo systemctl start yolo-demo.service
+sudo reboot
 ```
 
-## 3. Check Status
+---
 
-To verify it is running or to see errors:
+## Watching Logs
+
+To see server output after boot:
 
 ```bash
-sudo systemctl status yolo-demo.service
+tail -f /home/pi/yvnalv/projects/Training-Project/server.log
 ```
 
-To see the logs:
+The log includes:
+- Boot timestamp
+- Server PID
+- Detected target URL
+- Server readiness confirmation (or timeout warning)
+- Chromium stdout/stderr
+
+---
+
+## Stopping the Server
+
+The server runs as a background process. To find and stop it:
 
 ```bash
-journalctl -u yolo-demo.service -f
+# Find the uvicorn process
+ps aux | grep uvicorn
+
+# Kill by PID
+kill <PID>
 ```
+
+---
+
+## Disabling Autostart
+
+To stop VialVision from starting on boot without deleting the files:
+
+```bash
+rm ~/.config/autostart/vialvision.desktop
+```
+
+To re-enable, run the setup script again:
+
+```bash
+bash scripts/rpi_setup_autostart.sh
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Chromium does not open | Check `server.log` for startup errors; verify venv path is correct |
+| Server starts but wrong URL shown | Check `hostname -I` returns the expected IP |
+| Blank screen / certificate error | Accept the self-signed cert in Chromium the first time |
+| Server fails to bind port 8000 | Another process may be using port 8000; check with `ss -tlnp \| grep 8000` |
+| `dos2unix: command not found` | The setup script falls back to `sed`; this is handled automatically |
+| `chromium-browser: command not found` | Install with `sudo apt install chromium-browser` |
+
+---
+
+## Script Reference
+
+### scripts/rpi_start_server.sh
+
+Activates the virtual environment and starts the HTTPS server.
+
+```bash
+source /home/pi/yvnalv/vialvisionenv/bin/activate
+exec uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --ssl-keyfile key.pem \
+    --ssl-certfile cert.pem
+```
+
+### scripts/rpi_autostart.sh
+
+Boot orchestrator. Waits for desktop, starts server, polls until ready, opens Chromium.
+
+### scripts/vialvision.desktop
+
+XDG autostart entry. Installed to `~/.config/autostart/vialvision.desktop` by the setup script.
+
+### scripts/rpi_setup_autostart.sh
+
+One-time setup. Run once from the project root.

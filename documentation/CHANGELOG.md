@@ -5,6 +5,142 @@ Each entry includes the date, what changed, the problem it solved, and how it wa
 
 ---
 
+## [2026-04-19] RPi autostart, settings persistence, camera fixes, network IP
+**Branch:** `fixing-upload-button`
+**Date:** 2026-04-19
+
+---
+
+### Platform-aware settings persistence (database)
+
+**Problem:**
+UI settings (camera mode, FPS, resolution, confidence, flip) were lost on every page reload.
+Additionally, when the default camera was set to "server" mode, visiting the page on a Windows machine
+caused the `/capture` endpoint to try opening a local webcam and fail with:
+```
+RuntimeError: Could not open camera source: 0
+```
+
+**Fix:**
+- Added `settings` table to SQLite database (key-value store):
+  ```sql
+  CREATE TABLE settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+  );
+  ```
+- Added `GET /settings` endpoint: returns saved settings + platform info (`is_raspi`, `has_picamera2`, `default_camera_mode`) + device network IP
+- Added `PUT /settings` endpoint: upserts up to 5 allowed keys (`cameraMode`, `fps`, `resolution`, `confidence`, `flipHorizontal`)
+- Frontend calls `loadSettings()` on page load — applies saved values and uses `default_camera_mode` from server as the platform-aware default (server on Pi, client on Windows)
+- All settings change handlers now call a debounced `saveSettings()` (600 ms delay)
+
+**Files changed:**
+- `app/db/database.py` — added `settings` table and `CREATE TABLE` call in `init_db()`
+- `app/db/queries.py` — added `get_all_settings()` and `set_settings(data)` functions
+- `app/api.py` — added `GET /settings`, `PUT /settings`; added `_get_network_ip()`, `_platform_info()` helpers; added imports: `importlib`, `sys`, `socket`
+- `static/js/script.js` — added `loadSettings()`, `saveSettings()` with debounce; wired all settings handlers; called `loadSettings()` on page load
+
+---
+
+### Raspberry Pi camera — color fix (BGR/RGB pipeline)
+
+**Problem:**
+Images captured by the Pi camera via the `/capture` endpoint appeared blue (red and blue channels swapped).
+
+**Root Cause:**
+Two compounding issues:
+1. `BGR888` format in picamera2 delivers data in RGB byte order on some Pi hardware and libcamera versions (known libcamera quirk) — the format name is misleading
+2. `cv2.imencode` on ARM does not perform a BGR→RGB swap before libjpeg, so the JPEG was encoded with swapped channels regardless of the format string
+
+**Fix:**
+- Changed picamera2 init to always request `RGB888` format (universally reliable)
+- Changed `_capture_loop` from `capture_array()` to `capture_image("main")` which returns a PIL Image with guaranteed RGB channel order; added `.convert("RGB")` guard for rare RGBA output; then converts RGB→BGR with `cv2.cvtColor` so the in-memory frame buffer stays in OpenCV BGR convention
+- Changed `/capture` endpoint to use PIL for JPEG encoding: `cv2.COLOR_BGR2RGB` → `PIL.Image.fromarray` → `pil_img.save(buf, format="JPEG")` — avoids libjpeg ARM issues entirely
+
+**Files changed:**
+- `app/camera.py` — removed BGR888 attempt; always uses RGB888; `_capture_loop` uses `capture_image("main")` + `cv2.cvtColor(np.array(pil_frame), cv2.COLOR_RGB2BGR)`; added `import numpy as np`
+- `app/api.py` — `/capture` endpoint now uses PIL JPEG encoding; added `import io`, `from PIL import Image as _PIL_Image`
+
+---
+
+### Raspberry Pi camera — zoom out, sharpness, and autofocus
+
+**Problem:**
+Captured image was too zoomed in (object at 12 cm appeared too close; ideal capture distance is 19 cm).
+Image was also blurry.
+
+**Fix:**
+- Added `ScalerCrop` set to full `PixelArraySize` — uses the entire sensor pixel array, giving the widest possible field of view (maximum zoom-out)
+- Added `Sharpness: 4.0` (default is 1.0) to increase apparent sharpness at close range
+- Added `AfMode: 2` (Continuous autofocus) — effective on Camera Module 3; silently ignored on CM1/CM2 which have fixed focus
+- Added a 2-second stabilization wait in `/capture` after the first frame arrives — allows exposure, white balance, and AF to settle before the image is taken
+
+**Files changed:**
+- `app/camera.py` — added ScalerCrop, Sharpness, AfMode controls after `picam.start()`
+- `app/api.py` — `/capture` endpoint polls until first frame, then waits 2 s before encoding
+
+---
+
+### Network IP display in Settings
+
+**Problem:**
+Users needed to know the device's LAN IP address to connect from another device, but there was no way to see it from within the app.
+
+**Fix:**
+- Added `_get_network_ip()` helper in `api.py` using a UDP socket to `8.8.8.8:80` (no data sent) to detect the primary network interface IP
+- `GET /settings` response now includes `network_ip` field (`null` if no network)
+- Added "Network" settings group in the Settings view showing the device IP address
+
+**Files changed:**
+- `app/api.py` — added `_get_network_ip()`, included `network_ip` in `GET /settings` response
+- `templates/index.html` — added Network settings group with `#networkIp` span
+- `static/js/script.js` — `loadSettings()` populates `#networkIp` from `data.network_ip`
+
+---
+
+### Raspberry Pi autostart on boot (XDG / Wayfire)
+
+**Problem:**
+On boot, the server had to be started manually from a terminal. Chromium also had to be opened manually.
+
+**Background:**
+The Pi runs Raspberry Pi OS Trixie (Debian 13) with the Wayfire compositor. X11-based tools (`wmctrl`, `xdotool`) do not work on Wayland. The previous `systemd` service approach did not open a browser window.
+
+**Solution:**
+XDG autostart `.desktop` file in `~/.config/autostart/` — supported natively by Wayfire; executed at desktop login.
+
+**New files in `scripts/`:**
+
+| File | Purpose |
+|---|---|
+| `rpi_start_server.sh` | Activates venv, starts uvicorn HTTPS server |
+| `rpi_autostart.sh` | Boot orchestrator: waits for Wayfire, starts server, polls until ready, opens Chromium fullscreen |
+| `vialvision.desktop` | XDG autostart entry that launches `rpi_autostart.sh` at login |
+| `rpi_setup_autostart.sh` | One-time setup: marks scripts executable, converts CRLF→LF, installs `.desktop` file |
+
+**Boot sequence:**
+1. Wayfire compositor starts
+2. XDG autostart fires `rpi_autostart.sh` after login
+3. `sleep 8` — waits for Wayfire to fully initialize
+4. `rpi_start_server.sh` is launched in background → logs to `server.log`
+5. `hostname -I` detects LAN IP → builds URL (`https://$IP:8000` or `https://localhost:8000`)
+6. Polls `curl -k $URL` up to 90 seconds until server accepts connections
+7. Opens `chromium-browser --start-fullscreen --ignore-certificate-errors`
+
+**Setup (run once on the Pi):**
+```bash
+bash scripts/rpi_setup_autostart.sh
+sudo reboot
+```
+
+**Files changed (new):**
+- `scripts/rpi_start_server.sh`
+- `scripts/rpi_autostart.sh`
+- `scripts/vialvision.desktop`
+- `scripts/rpi_setup_autostart.sh`
+
+---
+
 ## [2026-04-16] Fix missing WebSocket dependencies
 **Commit:** `0c37bec`
 **Branch:** `bugs/fixing-raspi-camera-mode`

@@ -18,6 +18,83 @@ Returns the main web application HTML page.
 
 ---
 
+### GET /settings
+
+Returns the current UI settings (from database), platform information, and network IP.
+Used by the frontend on page load to restore saved settings and apply platform-aware defaults.
+
+**Response:** `application/json`
+
+```json
+{
+  "is_raspi": true,
+  "has_picamera2": true,
+  "default_camera_mode": "server",
+  "network_ip": "192.168.1.42",
+  "cameraMode": "server",
+  "fps": "5",
+  "resolution": "640x480",
+  "confidence": "0.25",
+  "flipHorizontal": "false"
+}
+```
+
+**Notes:**
+- `default_camera_mode` is `"server"` on Raspberry Pi (picamera2 available), `"client"` otherwise
+- `network_ip` is the primary LAN IP detected via UDP socket; `null` if no network
+- Settings keys (`cameraMode`, `fps`, etc.) are only present if they have been previously saved
+
+---
+
+### PUT /settings
+
+Save one or more UI settings to the database. Settings persist across server restarts.
+
+**Request:** `application/json`
+
+```json
+{
+  "cameraMode": "server",
+  "fps": "5",
+  "resolution": "640x480",
+  "confidence": "0.25",
+  "flipHorizontal": "false"
+}
+```
+
+All fields are optional. Allowed keys: `cameraMode`, `fps`, `resolution`, `confidence`, `flipHorizontal`.
+Unknown keys are silently ignored.
+
+**Response:** `application/json`
+
+```json
+{ "saved": true }
+```
+
+---
+
+### GET /capture
+
+Capture a single still image from the server-side camera (Raspberry Pi or USB camera).
+Waits up to 10 seconds for the camera to produce a frame, then waits an additional 2 seconds
+for exposure, white balance, and autofocus to stabilize before encoding.
+
+**Response:** `application/json`
+
+```json
+{ "image": "<base64-encoded JPEG>" }
+```
+
+**Error responses:**
+```json
+{ "error": "Camera is not running" }
+{ "error": "No frame available" }
+```
+
+Returns HTTP 503 if camera is not running, HTTP 504 if no frame is available within timeout.
+
+---
+
 ### GET /health
 
 Health check endpoint.

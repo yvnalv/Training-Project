@@ -14,6 +14,8 @@ test racks and calculate contamination levels from a photo or live camera stream
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design, data flow, module breakdown |
 | [API.md](API.md) | All REST endpoints and WebSocket protocol |
 | [CHANGELOG.md](CHANGELOG.md) | Timestamped log of all changes, bugs, and fixes |
+| [../Setup.md](../Setup.md) | First-time installation guide and full feature usage walkthrough |
+| [../raspberry_pi_startup_guide.md](../raspberry_pi_startup_guide.md) | Raspberry Pi autostart setup (XDG / Wayfire) |
 
 ---
 
@@ -69,7 +71,14 @@ Training Project/
 ├── data/                    # Created at runtime
 │   ├── vialvision.db        # SQLite database
 │   └── results/             # Annotated JPEG images
+├── scripts/
+│   ├── rpi_start_server.sh  # Activates venv + starts uvicorn
+│   ├── rpi_autostart.sh     # Boot orchestrator (server + Chromium)
+│   ├── vialvision.desktop   # XDG autostart entry
+│   └── rpi_setup_autostart.sh  # One-time setup script
 ├── documentation/           # This folder
+├── Setup.md                 # Installation + feature usage guide
+├── raspberry_pi_startup_guide.md
 ├── requirements.txt
 ├── key.pem / cert.pem       # Self-signed SSL certificate
 └── best.pt                  # Trained YOLOv8 model weights
@@ -83,8 +92,9 @@ Training Project/
 - **Live Stream** — Real-time inference from webcam (client) or server camera (Raspberry Pi)
 - **History** — Browse all past predictions, view annotated images, export to CSV
 - **MPN Guideline** — Built-in reference table and risk interpretation guide
-- **Settings** — Adjust FPS, resolution, rotation, flip, and confidence threshold
-- **HTTPS** — SSL support for secure remote access
+- **Settings** — Adjust FPS, resolution, rotation, flip, and confidence threshold; settings saved to database and restored on reload
+- **Network IP** — Device LAN IP shown in Settings for easy browser access from other devices
+- **HTTPS** — SSL support for secure remote access and camera permissions
 
 ---
 

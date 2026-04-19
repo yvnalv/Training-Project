@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=VialVision
+Comment=Start VialVision server and open browser on boot
+Exec=/bin/bash /home/pi/yvnalv/projects/Training-Project/scripts/rpi_autostart.sh
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
