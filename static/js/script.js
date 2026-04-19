@@ -1153,6 +1153,10 @@ async function loadSettings() {
             if (flipEl) flipEl.checked = flip;
         }
 
+        // network IP
+        const ipEl = document.getElementById('networkIp');
+        if (ipEl) ipEl.textContent = data.network_ip || 'No Network';
+
     } catch (e) {
         console.warn('Could not load settings:', e);
     }

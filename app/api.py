@@ -4,6 +4,7 @@ import importlib
 import io
 import json
 import logging
+import socket
 import sys
 
 from PIL import Image as _PIL_Image
@@ -212,6 +213,19 @@ async def delete_history_record(record_id: int):
 # REST — settings (persist UI preferences to DB)
 # ---------------------------------------------------------------------------
 
+def _get_network_ip() -> str | None:
+    """Return the machine's primary LAN/WiFi IP, or None if offline."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return None
+
+
 def _platform_info() -> dict:
     """Return platform detection hints used by the frontend to pick defaults."""
     is_linux = sys.platform.startswith("linux")
@@ -241,7 +255,11 @@ async def get_settings_endpoint():
         }
     """
     saved = get_all_settings()
-    return JSONResponse(content={**_platform_info(), "settings": saved})
+    return JSONResponse(content={
+        **_platform_info(),
+        "network_ip": _get_network_ip(),
+        "settings": saved,
+    })
 
 
 @router.put("/settings")
