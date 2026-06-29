@@ -1,77 +1,118 @@
-# Raspberry Pi YOLO Object Detection Demo
+# VialVision
 
-This project is a lightweight, real-time object detection system designed for the Raspberry Pi 4. It uses the **YOLOv8 Nano** model to provide fast inference with a modern web interface.
+**Real-time bacterial-contamination detection for 9-tube MPN test racks.**
 
-## 🚀 Features
+VialVision is a lightweight web application that uses a YOLOv8 Nano model to read a
+**9-tube Most Probable Number (MPN)** rack from a photo or a live camera feed. It
+counts the positive tubes, maps the result to a standardized MPN value with a 95 %
+confidence interval, and reports a food-safety risk level. It runs on a **Raspberry
+Pi 4** with the Pi camera, and on any desktop for development.
 
-*   **Fast Inference**: Uses `yolov8n` (Nano version) optimized for speed on edge devices.
-*   **Web Interface**: Simple, responsive UI for uploading images and viewing results.
-*   **Real-time WebSocket Streaming**: Supports continuous inference via WebSockets.
-*   **Camera Integration**: Can capture from the Raspberry Pi Camera or USB webcam directly on the server.
-*   **API-First Design**: Backend logic is exposed via standard REST and WebSocket endpoints.
+---
 
-## 🛠 Tech Stack
+## Features
 
-*   **Backend**: [FastAPI](https://fastapi.tiangolo.com/) (Python)
-*   **AI Model**: [Ultralytics YOLOv8](https://docs.ultralytics.com/)
-*   **Computer Vision**: OpenCV (`cv2`), Pillow (`PIL`)
-*   **Frontend**: HTML5, JavaScript (Vanilla), CSS
-*   **Server**: Uvicorn (ASGI)
+- **Image analysis** — upload a photo of a rack and get an instant MPN reading
+- **Live stream** — continuous inference from a browser webcam (client mode) or the
+  server's Pi/USB camera (server mode), over WebSockets
+- **History** — browse, view, delete, and export (CSV) all past predictions
+- **MPN guideline** — built-in reference table of all 40 patterns and risk levels
+- **Settings** — FPS, resolution, flip, confidence threshold; persisted to the DB
+- **HTTPS** — self-signed SSL for secure remote access and browser camera permission
+- **Raspberry Pi autostart** — boots straight into fullscreen Chromium
 
-## 📂 Project Structure
+---
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Web framework | FastAPI (async Python) |
+| ASGI server | Uvicorn |
+| ML model | Ultralytics YOLOv8 Nano (`best.pt`) |
+| Vision | Pillow, OpenCV (headless), NumPy |
+| Database | SQLite (WAL mode) |
+| Realtime | WebSockets |
+| Frontend | Vanilla HTML/CSS/JS + Jinja2 |
+| Camera | picamera2 (Pi) / OpenCV (desktop) |
+
+---
+
+## Quick start
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Place the trained model weights (best.pt) in the project root
+
+# 3a. Run over HTTP (camera upload from phones will NOT work)
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 3b. Run over HTTPS (recommended — required for browser camera access)
+python generate_cert.py   # once, creates key.pem + cert.pem
+uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+  --ssl-keyfile key.pem --ssl-certfile cert.pem
+```
+
+Open `https://<device-ip>:8000` and accept the self-signed certificate warning once.
+
+Full installation and a feature walkthrough are in **[Setup.md](Setup.md)**.
+
+---
+
+## How it works
 
 ```
-├── app/
-│   ├── main.py         # Entry point, mounts static files and API
-│   ├── api.py          # API Routes (REST endpoints & WebSocket logic)
-│   ├── inference.py    # YOLOv8 model loading and inference logic
-│   └── camera.py       # Camera handling for server-side streaming
-├── static/             # CSS and JavaScript files
-├── templates/          # HTML templates
-├── requirements.txt    # Python dependencies
-├── raspberry_pi_startup_guide.md # Instructions for auto-start on Pi
-└── README.md           # This file
+Photo / camera frame
+        │
+   YOLOv8 detect  ──►  greedy NMS dedup  ──►  hard cap 9 tubes
+        │
+   Yellow_Bubble = 1, else 0   ──►  group into (x, y, z) dilution counts
+        │
+   Pattern  "P{x}{y}{z}"   ──►  MPN table lookup
+        │
+   MPN value + 95% CI + risk level  +  annotated image
 ```
 
-## ⚡ How It Works
+See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** and
+**[docs/INFERENCE_PIPELINE.md](docs/INFERENCE_PIPELINE.md)** for details.
 
-### Flow 1: Image Upload (REST API)
-1.  User selects an image in the Web UI.
-2.  Image is sent to `POST /predict`.
-3.  Server processes image through YOLOv8n.
-4.  Server returns JSON detections + Base64 annotated image.
-5.  UI displays the result.
+---
 
-### Flow 2: Real-time Camera (WebSocket)
-1.  Frontend connects to `ws://server/ws`.
-2.  **Client Mode**: Browser sends camera frames -> Server predicts -> Returns annotated frame.
-3.  **This allows testing the "Pi Camera" experience even from a laptop.**
+## Documentation
 
-## 🏃‍♂️ Getting Started
+Start at **[docs/README.md](docs/README.md)** for the full index. Highlights:
 
-### Prerequisites
-*   Python 3.9+
-*   A webcam (optional, for streaming)
+| Doc | What's in it |
+|---|---|
+| [docs/PRD.md](docs/PRD.md) | Product goals, scope, requirements |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and data flow |
+| [docs/MPN_DESIGN.md](docs/MPN_DESIGN.md) | The MPN method and risk model |
+| [docs/API_SPEC.md](docs/API_SPEC.md) | REST + WebSocket contract |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Running on a Raspberry Pi |
+| [CHANGELOG.md](CHANGELOG.md) | Full history of changes and fixes |
+| [Setup.md](Setup.md) | Installation + feature usage guide |
 
-### Local Setup
-1.  **Install Dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-2.  **Run the Server**:
-    ```bash
-    uvicorn app.main:app --host 0.0.0.0 --port 8000
-    ```
-3.  **Access the UI**:
-    Open [http://localhost:8000](http://localhost:8000) in your browser.
+---
 
-### Raspberry Pi Deployment
-For instructions on running this on a Raspberry Pi 4, including auto-start configuration, see [raspberry_pi_startup_guide.md](raspberry_pi_startup_guide.md).
+## Deployment targets
 
-## 📊 Model Details
+| Target | Notes |
+|---|---|
+| Windows / macOS / Linux (dev) | OpenCV webcam, full feature support |
+| Raspberry Pi 4 | Preferred deployment; picamera2 + autostart |
 
-The project uses the **COCO pretrained YOLOv8 Nano** model, which can detect **80 classes** of objects including:
-*   Person
-*   Vehicles (Car, Bus, Bicycle...)
-*   Animals (Dog, Cat, Bird...)
-*   Household items (Chair, Bottle, Laptop...)
+See **[raspberry_pi_startup_guide.md](raspberry_pi_startup_guide.md)** for the Pi
+autostart setup.
+
+---
+
+## MPN method in one paragraph
+
+The Most Probable Number method estimates bacterial concentration via serial
+dilution. Nine tubes are arranged in three groups of three (0.1 g, 0.01 g, 0.001 g).
+A **yellow tube with a bubble is positive (1)**; anything else is negative (0). The
+pattern of positives across the three groups (e.g. `P210`) maps to a standardized
+MPN/g value with a 95 % confidence interval and a risk level (Safe / Low / Moderate
+/ High).
