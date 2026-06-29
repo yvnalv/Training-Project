@@ -36,6 +36,7 @@ VialVision domain:
 | Doc | Description |
 |---|---|
 | [STATUS.md](STATUS.md) | Where we are, milestones, what's next |
+| [NEXT_STEPS.md](NEXT_STEPS.md) | Sequenced, gated action plan for the accuracy work |
 | [PRD.md](PRD.md) | Product requirements — goals, scope, users |
 | [ROADMAP.md](ROADMAP.md) | Phased plan of future work |
 | [DECISIONS.md](DECISIONS.md) | Log of significant decisions |

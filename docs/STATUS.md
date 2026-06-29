@@ -42,13 +42,18 @@ See [../CHANGELOG.md](../CHANGELOG.md) for the complete history.
 
 ## What's next
 
-See [ROADMAP.md](ROADMAP.md) for the full plan. Near-term candidates:
+**Active focus: prediction accuracy** (client-reported). The sequenced, gated action
+plan is in **[NEXT_STEPS.md](NEXT_STEPS.md)** — **Phase 0 (eval harness + labeled
+dataset) starts 2026-06-30.** Background and tradeoffs in
+[ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md); hardware in [HARDWARE.md](HARDWARE.md).
+
+Other near-term candidates (see [ROADMAP.md](ROADMAP.md)):
 
 1. Add a minimal automated test suite (the two root `test_*.py` scripts call a
    removed `run_inference` signature and are stale — see [TESTING.md](TESTING.md)).
 2. Tighten the over/under-detection handling UX (clear messaging when `total_tubes
    != 9`).
-3. Model accuracy improvements / retraining (see [MODEL_AND_DATA.md](MODEL_AND_DATA.md)).
+3. Low-risk reliability fixes folded into Phase 2.3 of [NEXT_STEPS.md](NEXT_STEPS.md).
 
 ## Known issues / debt
 
