@@ -5,6 +5,10 @@ appliance). For a complete first-time install and feature walkthrough, see
 [../Setup.md](../Setup.md). For the full Pi autostart reference, see
 [../raspberry_pi_startup_guide.md](../raspberry_pi_startup_guide.md).
 
+> **Choosing hardware?** See [HARDWARE.md](HARDWARE.md) for a benchmarked
+> recommendation (short version: Raspberry Pi 5 (8 GB) + NCNN export, and spend the
+> rest of the budget on camera + lighting rather than a faster chip).
+
 ## Prerequisites
 
 - Python **3.10+**

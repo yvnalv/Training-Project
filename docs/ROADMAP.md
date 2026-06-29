@@ -22,10 +22,18 @@ done, see [STATUS.md](STATUS.md) and [../CHANGELOG.md](../CHANGELOG.md).
   adjust lighting/confidence) instead of a bare `N/A`.
 - **Confidence-threshold tuning** guidance baked into the UI.
 
-## Phase 2 — Model quality
+## Phase 2 — Model quality & accuracy
 
+See [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) for the full prioritized plan
+(measurement, lighting/camera, fixed-ROI, retraining) and the **YOLO26** upgrade
+evaluation.
+
+- Build a labeled evaluation set (prerequisite for everything measurable).
+- Control lighting and lock camera focus/exposure/white balance.
+- Export the model to **NCNN** (~4× faster on Pi, near-zero risk).
 - Curate and version the training dataset (see [MODEL_AND_DATA.md](MODEL_AND_DATA.md)).
 - Retrain / fine-tune for fewer false positives at rack edges and labels.
+- Evaluate retraining on **YOLO26n** (edge-first, NMS-free) vs the current model.
 - Track model versions and metrics; stop committing multiple `.pt` checkpoints.
 
 ## Phase 3 — Operability
@@ -33,6 +41,8 @@ done, see [STATUS.md](STATUS.md) and [../CHANGELOG.md](../CHANGELOG.md).
 - Optional Docker/compose packaging for non-Pi deployment.
 - Health/metrics surface beyond `/health` (e.g. last inference latency).
 - Configurable history cap and storage location.
+- Hardware refresh as needed — see [HARDWARE.md](HARDWARE.md) (Raspberry Pi 5 + NCNN
+  recommended; optional Hailo AI HAT+ for video-rate headroom).
 
 ## Phase 4 — Nice-to-haves
 

@@ -13,6 +13,15 @@
 | Loaded by | `app/inference.py`: `model = YOLO("best.pt")` (once, at import) |
 | Classes | Tube-detection classes (notably `Yellow_Bubble` = positive) — **not** COCO |
 | Inference settings | `conf` (clamped 0.05–0.95), `iou=0.6`, `agnostic_nms=True` |
+| Export format | PyTorch `.pt` (no NCNN/ONNX export — see note below) |
+
+> **Speed note:** the model runs as a raw PyTorch `.pt`, which is the *slowest* format
+> on a Raspberry Pi (~302 ms vs ~68 ms for NCNN at 640 on a Pi 5). Exporting to
+> **NCNN** is a ~4× speedup at near-zero risk and is the recommended first
+> optimization. **Upgrading to YOLO26** (edge-first, NMS-free) is also evaluated in
+> [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) — note it requires retraining on
+> our own dataset to benefit. For the board-level comparison and benchmarks
+> (Pi 5 / Hailo / Jetson), see [HARDWARE.md](HARDWARE.md).
 
 The model is loaded relative to the **working directory** as `"best.pt"`, so the
 server must be started from the project root (as all run commands and scripts do).
