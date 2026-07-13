@@ -8,10 +8,12 @@
 
 | Item | Value |
 |---|---|
-| Architecture | Ultralytics YOLOv8 **Nano** |
+| Architecture | Ultralytics YOLOv8 **Nano** (verified: base `yolov8n.pt`, ~3.0 M params, task=detect) |
 | Active weights | `best.pt` (project root) |
 | Loaded by | `app/inference.py`: `model = YOLO("best.pt")` (once, at import) |
-| Classes | Tube-detection classes (notably `Yellow_Bubble` = positive) — **not** COCO |
+| Classes | **4:** `Purple_Bubble`, `Purple_NoBubble`, `Yellow_Bubble`, `Yellow_NoBubble` (IDs 0–3) — **not** COCO |
+| Positive rule | Only `Yellow_Bubble` (id 2) → positive; the other three → negative. See [LABELING_STRATEGY.md](LABELING_STRATEGY.md) |
+| Trained with | ultralytics 8.3.x (env has 8.4.37, which already ships YOLO26 configs) |
 | Inference settings | `conf` (clamped 0.05–0.95), `iou=0.6`, `agnostic_nms=True` |
 | Export format | PyTorch `.pt` (no NCNN/ONNX export — see note below) |
 
