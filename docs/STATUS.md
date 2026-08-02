@@ -42,10 +42,15 @@ See [../CHANGELOG.md](../CHANGELOG.md) for the complete history.
 
 ## What's next
 
-**Active focus: prediction accuracy** (client-reported). The sequenced, gated action
-plan is in **[NEXT_STEPS.md](NEXT_STEPS.md)** — **Phase 0 (eval harness + labeled
-dataset) starts 2026-06-30.** Background and tradeoffs in
+**Active focus: prediction accuracy** (client-reported). Decided 2026-06-29: **upgrade
+YOLOv8n → YOLO26, keeping object detection**, retrain on the existing Roboflow dataset,
+and deploy via **NCNN on a Raspberry Pi 5**. The sequenced, gated build plan (two
+parallel tracks — design-team jig/eval set + interim modeling) is in
+**[NEXT_STEPS.md](NEXT_STEPS.md)**; label/preprocessing/augmentation policy in
+[LABELING_STRATEGY.md](LABELING_STRATEGY.md); background/tradeoffs in
 [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md); hardware in [HARDWARE.md](HARDWARE.md).
+**Track A (jig + new-jig eval set) starts 2026-06-30**; Track B (interim training on the
+current data) can start now.
 
 Other near-term candidates (see [ROADMAP.md](ROADMAP.md)):
 

@@ -1,15 +1,16 @@
 # Next Steps — End-to-End Plan
 
-_Created: 2026-06-29 · Phase 0 starts: **2026-06-30**_
+_Created: 2026-06-29 · Last updated: 2026-06-29 · Phase 0 (design team) starts: **2026-06-30**_
 
-Complete, end-to-end plan to rebuild VialVision's reading pipeline for higher accuracy
-(and speed) on the fixed jig: **fixed-ROI per-tube classification** with a **retrained
-YOLO26 classifier**. Covers dataset collection → labeling → annotation → modeling →
-export → app integration → on-device rollout → continuous improvement.
+Complete, end-to-end plan to upgrade VialVision's model from **YOLOv8n → YOLO26**,
+**keeping the object-detection architecture**, and deploying via **NCNN on a Raspberry
+Pi 5**. Covers dataset (Roboflow) → preprocessing/augmentation → training → export →
+app integration → new-jig data + retrain → rollout → continuous improvement.
 
-Companion docs: [LABELING_STRATEGY.md](LABELING_STRATEGY.md),
-[ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md), [HARDWARE.md](HARDWARE.md),
-[MODEL_AND_DATA.md](MODEL_AND_DATA.md), [INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md).
+Companion docs: [LABELING_STRATEGY.md](LABELING_STRATEGY.md) (label schema +
+preprocessing/augmentation policy), [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md),
+[HARDWARE.md](HARDWARE.md), [MODEL_AND_DATA.md](MODEL_AND_DATA.md),
+[INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md).
 
 ---
 
@@ -17,264 +18,264 @@ Companion docs: [LABELING_STRATEGY.md](LABELING_STRATEGY.md),
 
 | # | Decision |
 |---|---|
-| Fixture | **Fixed jig** holds Pi + camera + rack in a fixed geometry → tube positions are known pixel coordinates ✅ |
-| Architecture | **Path B — fixed-ROI + per-tube classification** (no detection, no NMS, no dedup, no "count ≠ 9") |
-| Model | **YOLO26 classifier** (`yolo26n-cls`, compare `yolo26s-cls`), retrained on our data; export **NCNN** |
-| Labels | **4 classes** (`Purple_Bubble`, `Purple_NoBubble`, `Yellow_Bubble`, `Yellow_NoBubble`), binary collapse in code; positive = `Yellow_Bubble` only |
-| Data | Combine **previous** (detection boxes → crops) + **new** (single-tube photos), captured **through the production jig** |
+| Architecture | **Object detection (Path A)** — keep the current detection pipeline. The prior fixed-ROI classification idea (Path B) is shelved as a documented fallback. |
+| Model | **YOLO26 detection** — `yolo26n` (start), compare `yolo26s`; export **NCNN** for the Pi 5 |
+| Dataset | Existing **Roboflow detection** dataset (mixed 1-tube + 9-tube photos, **every tube boxed**); **downloaded in YOLO26 format** |
+| Labels | **3 classes:** `yellow_positive` (=1), `yellow_negative` (=0), `purple_negative` (=0). Positive = `yellow_positive` only. Purple-with-bubble → `purple_negative` (hard negative). |
+| Fixture | **Fixed jig** (Pi + camera + rack) — used for capture consistency & locked lighting (helps detection accuracy too), not for ROI cropping |
 | Hardware | **Raspberry Pi 5 (8 GB)** + NCNN; optional Hailo AI HAT+ for headroom |
 | Priority | **Accuracy first**, speed still important |
-| Sequencing | This supersedes the earlier tiered accuracy plan; it *is* the Phase-4 model work, now with a committed architecture |
+
+Verified facts: current `best.pt` is **YOLOv8n**, 4 classes, ~3.0 M params; env has
+**ultralytics 8.4.37** (ships YOLO26). See [MODEL_AND_DATA.md](MODEL_AND_DATA.md).
 
 ---
 
-## Target architecture (what we're building)
+## Current dataset snapshot (old-jig bootstrap)
+
+Annotated on Roboflow (object detection). Counts of the single-tube category photos:
+
+| Class | Count | Notes |
+|---|---|---|
+| `yellow_positive` (positive) | **422** | ✅ Well represented |
+| `purple_negative` (negative) | 231 | Ensure enough purple-**with-bubble** hard negatives inside this |
+| `yellow_negative` (negative) | **58** | 🔴 Too few — the critical `yellow_positive ↔ yellow_negative` boundary |
+
+This is a **bootstrap** set from the **old jig** — good enough to shake out the whole
+pipeline and get an early signal, **not** the final training set. The new jig may differ
+in framing/lighting, so plan a fresh collection (Phase 5). See §"Parallel tracks".
+
+---
+
+## Target architecture (unchanged pipeline, new model)
 
 ```
-Camera frame (full res, via jig)
+Camera frame (via jig)
       │
- [optional] alignment check (fiducial / rack-edge) — correct small shifts
+ YOLO26 detect (NMS-free / end-to-end)   ← was YOLOv8n
       │
- crop 9 FIXED ROIs  (positions from one-time jig calibration; grouped 1-3 | 4-6 | 7-9)
+ suppress_duplicate_tubes()  ← VALIDATE: may be redundant with NMS-free; keep hard-cap-9 + L→R sort
       │
- classify each crop → 4-class softmax → argmax
-      │
- emit 9 "detection" dicts { label, confidence, bbox=ROI }   ← SAME contract as today
-      │
- detections_to_tubes()  → Yellow_Bubble=1, else 0   (unchanged)
+ detections_to_tubes()  → yellow_positive=1, else 0   (label string updated — see Phase 4)
       │
  tubes_to_xyz() → pattern "P{x}{y}{z}" → lookup_mpn() → MPN + CI + risk   (unchanged)
 ```
 
-**Key design choice:** the new inference path returns the **same detection-dict shape**
-the app already consumes, so **MPN lookup, the database, the REST/WebSocket contract,
-and the entire frontend stay unchanged.** Only the "how we get the 9 labels" is
-replaced. `total_tubes` is always 9, so MPN always computes.
-
-**What is removed/retired:** `suppress_duplicate_tubes()` (greedy NMS + dedup), the
-hard-cap-9, the 50% downscale, and the `iou`/`agnostic_nms` YOLO args — none are needed
-once positions are fixed and we classify crops directly.
+**Blast radius is small:** only the model (and a couple of inference args) change.
+`detections_to_tubes`, `tubes_to_xyz`, `_compute_mpn`, the DB, the REST/WebSocket
+contract, and the entire frontend stay as-is.
 
 ---
 
 ## Guiding principles
 
-1. **Measure first, gate every phase.** No integration before the model beats the
-   baseline on the held-out eval set.
-2. **Train through the production jig.** Training crops must come from the same jig,
-   camera, lighting, and distance as production — exact domain match is the biggest
-   accuracy lever.
-3. **Preserve the output contract** (detection dicts) to minimize blast radius.
-4. **Preserve the 4 class names and IDs** (0–3) so we can fine-tune and stay compatible.
-5. **Version datasets and models**; keep a manifest and a held-out test set that is
-   never trained on.
+1. **Measure first, gate every phase.** No rollout before the model beats the baseline
+   on a **new-jig** eval set.
+2. **Protect the signal.** Yellow-vs-purple **color** and **bubble** detail are the
+   whole game — no hue augmentation, no bubble-erasing transforms (see
+   [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §"Preprocessing & augmentation").
+3. **Positive label is now `yellow_positive`** (renamed from `Yellow_Bubble`) — the code
+   that keys the positive off that string must be updated (Phase 4.4).
+4. **The eval/test set must be new-jig** (production domain); never mix old-jig images
+   into it.
+5. **Version datasets and models.**
 
 ## Success metrics (definition of done)
 
-Because positions are fixed, "count accuracy" is trivially 9 — the meaningful metrics are:
-- **Per-condition accuracy** (4-class) + confusion matrix (watch `Yellow_Bubble ↔
-  Yellow_NoBubble` and `Yellow_Bubble ↔ Purple_Bubble`).
-- **Per-tube binary accuracy** (positive/negative — what drives the pattern).
+- **mAP** (overall + per class) from `model.val()`.
+- **Per-tube binary accuracy** (positive/negative — drives the pattern).
 - **MPN-pattern accuracy** — % of racks whose final `P{x}{y}{z}` matches ground truth
   (**the number the client experiences**).
 - **On-device latency** on the Pi 5 (per export format).
+- Confusion focus: **`yellow_positive ↔ yellow_negative`** (costly false pos/neg) and
+  **`yellow_positive ↔ purple_negative`** (color error).
 
 ---
 
-## Phase 0 — Foundations  ·  starts 2026-06-30  ·  ~2–4 days
+## Parallel tracks
 
-- [ ] **0.1 Finalize the jig & fix the optics.** Mount Pi + camera + rack in the jig.
-  **Lock the camera** (manual focus at the jig distance, fixed exposure, fixed white
-  balance — kill AWB drift; see [CAMERA.md](CAMERA.md)). Set **controlled lighting**
-  (even, diffuse; back/side-light so bubbles pop). This rig is *both* the training-data
-  source and the production capture — they must be identical.
-- [ ] **0.2 ROI calibration.** Capture a reference frame through the jig. Define the
-  **9 tube ROIs** as `(x, y, w, h)` in image pixels, **ordered left→right and grouped**
-  (tubes 1–3, 4–6, 7–9) to match `tubes_to_xyz`. Use **generous margins** to absorb
-  rack-insertion tolerance. Store as a config (e.g. `roi_config.json`). *Optional
-  robustness:* add fiducial markers to the jig/rack for automatic small-shift
-  correction.
-- [ ] **0.3 Eval harness + baseline.** Build a held-out **evaluation set** (rack images
-  through the jig, with ground-truth per-tube conditions and the correct pattern).
-  Write a scoring script reporting the four metrics above. **Baseline the current
-  `best.pt`** so every later change is measured against a real number.
+Two tracks run at once and converge at Phase 5:
 
-**Gate:** jig geometry is reproducible, the 9 ROIs are defined and verified on several
-inserts, and baseline metrics exist.
+- **Track A — design team (Phase 0, starts 2026-06-30):** finalize the jig, lock
+  camera/lighting, build the **new-jig eval set**, baseline the current model.
+- **Track B — modeling (now):** the Roboflow data is already annotated, so train an
+  **interim YOLO26** on the bootstrap set to validate the export→train→integrate
+  pipeline and get an early signal (Phases 1–4). Read interim numbers as **optimistic**
+  (old-jig, `Yellow_NoBubble` only 58) — the real verdict comes from the new-jig eval
+  set at Phase 5.
 
 ---
 
-## Phase 1 — Dataset collection  ·  ~3–7 days (spread)
+## Phase 0 — Foundations (Track A, design team)  ·  starts 2026-06-30  ·  ~2–4 days
 
-- [ ] **1.1 Capture through the jig only.** All training images use the production jig,
-  camera, lighting, and distance. Two complementary sources:
-  - **Single-tube photos** per category (your plan) → native classification data.
-  - **Full-rack photos** in varied patterns → crop the 9 ROIs into per-tube images.
-- [ ] **1.2 Coverage & balance.**
-  - All **4 conditions**, well represented.
-  - Every one of the **9 positions** (avoid position bias — a tube in slot 1 vs slot 9
-    can differ in lighting/perspective even in a jig).
-  - **Over-collect `Yellow_Bubble` (positive)** — it is the rare-but-critical class
-    (real racks are often positive-sparse). See [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §8.
-  - Include realistic variation the rig will see: minor lighting changes, tube
-    insertion tolerance, bubble sizes, color intensities.
-- [ ] **1.3 Volume & manifest.** Target a healthy count per class (aim for a few hundred
-  crops per class minimum; more for the positive). Record every image in a **manifest
-  CSV** (source, capture date, condition, position, rack pattern).
+- [ ] **0.1 Finalize the jig & lock the optics.** Mount Pi + camera + rack. **Lock the
+  camera** (manual focus at the jig distance, fixed exposure, fixed white balance — kill
+  AWB drift; see [CAMERA.md](CAMERA.md)). Set **controlled lighting** (even, diffuse;
+  back/side-light so bubbles pop).
+- [ ] **0.2 Build the new-jig eval set.** Capture held-out rack images **through the new
+  jig**, with ground-truth per-tube conditions and the correct pattern. This is the only
+  honest measure of production accuracy — **never train on it**.
+- [ ] **0.3 Baseline the current model.** Run `best.pt` over the eval set; record mAP /
+  per-tube / MPN-pattern accuracy + latency as the number to beat.
 
-**Gate:** per-class counts are adequate and reasonably balanced (positive class not
-starved); manifest complete.
+**Gate:** jig reproducible; new-jig eval set + baseline metrics exist.
 
 ---
 
-## Phase 2 — Labeling & annotation  ·  ~2–5 days
+## Phase 1 — Dataset prep in Roboflow (Track B)  ·  mostly done  ·  ~0.5–1 day
 
-Follow [LABELING_STRATEGY.md](LABELING_STRATEGY.md) in full.
+- [x] **1.1 Project settings confirmed.** Object detection; **3 classes** —
+  `yellow_positive`, `yellow_negative`, `purple_negative`. Dataset **downloaded in
+  YOLO26 format**. (Verify `purple_negative` includes purple-with-bubble hard negatives.)
+- [ ] **1.2 Preprocessing** (applies to all images + inference): **Auto-Orient ON**,
+  **Resize 640×640 (Fit/letterbox)**, **no Grayscale**, no contrast/tile. See
+  [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §"Preprocessing & augmentation".
+- [ ] **1.3 Augmentation** (training only) — **minimal and color-safe**: modest
+  Brightness ±10%, Exposure ±10%, Rotation ±5°; multiplier ≤ 3×. **No Hue, no
+  Saturation, no vertical flip, no Blur/Noise, no Cutout/Mosaic.**
+- [ ] **1.4 Export** — choose the **YOLO26** format (native for the target model). If
+  unavailable, **YOLOv11**/YOLOv8 work identically (the detection txt format is the
+  same). Gives `data.yaml` + images/labels.
 
-- [ ] **2.1 Labeling guide.** Finalize example images for each of the 4 classes and the
-  **edge-case rules**: minimum-bubble definition (with examples), color tie-break for
-  transitional hues, exclude occluded/blurred, meniscus/reflection ≠ bubble.
-- [ ] **2.2 Annotate (classification / ImageFolder).** Sort every crop into one of the 4
-  class folders (`Yellow_Bubble/`, `Yellow_NoBubble/`, `Purple_Bubble/`,
-  `Purple_NoBubble/`). **Preserve the exact class names.**
-- [ ] **2.3 Convert previous detection data.** Crop each labeled box from the old rack
-  images into the matching class folder (reuse of existing labels — no re-labeling).
-- [ ] **2.4 QC review.** A second reviewer spot-checks against the guide; fix
-  inconsistencies. Watch mislabels between the confusable pairs.
+**Gate:** dataset version exported; preprocessing/augmentation policy applied.
 
-**Gate:** labeled set passes QC; class names/IDs correct.
-
----
-
-## Phase 3 — Dataset assembly  ·  ~1–2 days
-
-- [ ] **3.1 Merge & de-duplicate.** Combine old-crops + new-crops; remove near-duplicate
-  frames so one tube doesn't dominate.
-- [ ] **3.2 Balance.** Equalize class counts via oversampling/augmentation of minority
-  classes, or plan class weights at train time.
-- [ ] **3.3 Split by sample (no leakage).** All crops from one rack photo / tube session
-  stay in the same split. ~70/15/15 train/val/test. **The test split = the Phase-0
-  eval set — never trained on.** See [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §9.
-- [ ] **3.4 Freeze `dataset vX`** (ImageFolder tree + manifest) for reproducibility.
-
-**Gate:** reproducible, balanced, leak-free dataset version exists.
+> Data caveat: this is the old-jig bootstrap set; `Yellow_NoBubble` (58) is thin, so its
+> interim metrics will be unreliable. Fixed in Phase 5.
 
 ---
 
-## Phase 4 — Modeling: train, evaluate, iterate  ·  ~3–7 days
+## Phase 2 — Train YOLO26 detection (Track B)  ·  ~2–5 days
 
-- [ ] **4.1 Train the classifier.** `YOLO("yolo26n-cls.pt").train(data=<dataset_dir>,
-  epochs=…, imgsz=<crop size, e.g. 128>, …)`. Use mild, realistic augmentation
-  (color jitter within real range, small rotation/translation for insertion tolerance,
-  brightness); **class weights / oversampling** for the positive class. Keep the
-  toolchain consistent with the installed ultralytics (8.4.37, ships YOLO26).
-- [ ] **4.2 Compare variants.** Evaluate `yolo26n-cls` vs `yolo26s-cls` (accuracy first;
-  both are cheap on 9 small crops). Optionally a tiny CNN baseline for reference.
-- [ ] **4.3 Evaluate on the held-out test set.** Report **per-condition confusion**,
-  **per-tube binary accuracy**, **MPN-pattern accuracy**, and Pi latency (measured in
-  Phase 5). Do targeted error analysis on the confusable pairs.
-- [ ] **4.4 Iterate.** Address errors with *data* first (more/better examples of the
-  failing condition/position), then hyperparameters. Re-measure each time.
-- [ ] **4.5 Select the winner** vs the Phase-0 baseline.
+- [ ] **2.1 Train** with color/bubble-safe settings:
+  ```python
+  from ultralytics import YOLO
+  model = YOLO("yolo26n.pt")                 # detection pretrained
+  model.train(
+      data="path/to/data.yaml", epochs=100, imgsz=640, patience=20,
+      hsv_h=0.0,      # no hue shift — protect yellow vs purple
+      hsv_s=0.3, hsv_v=0.4,
+      flipud=0.0,     # no vertical flip (bubble is at top)
+      fliplr=0.5, degrees=5.0,
+  )
+  ```
+- [ ] **2.2 Compare `yolo26s`** (accuracy first; NCNN keeps `s` affordable on the Pi 5).
+- [ ] **2.3 Evaluate** (`model.val()`): mAP, per-class, confusion — focus on the two
+  confusable pairs above.
+- [ ] **2.4 Iterate** — fix errors with **data first** (esp. `Yellow_NoBubble` and
+  purple-bubble hard negatives), then hyperparameters.
 
-**Gate:** chosen model beats baseline on **MPN-pattern accuracy** by the agreed margin,
-with acceptable per-tube accuracy.
-
----
-
-## Phase 5 — Export & optimize for the Pi  ·  ~1–2 days
-
-- [ ] **5.1 Export to NCNN**; verify accuracy **parity** vs PyTorch on the test set
-  (quantization/format must not degrade results).
-- [ ] **5.2 Benchmark on the Pi 5.** Measure end-to-end latency (capture → 9-crop
-  classify → MPN). **Batch the 9 crops into one inference call.** Confirm it meets the
-  latency target.
-- [ ] **5.3 Variant/hardware decision.** Pick `n` vs `s` from the accuracy/latency
-  curve. If more headroom is wanted (e.g. `s`/`m` at video rates for the live preview),
-  evaluate the **Hailo AI HAT+** ([HARDWARE.md](HARDWARE.md)).
-
-**Gate:** on-device latency + accuracy both acceptable.
+**Gate:** interim model trains cleanly and the pipeline is validated end-to-end.
 
 ---
 
-## Phase 6 — App integration  ·  ~3–6 days
+## Phase 3 — Export & Pi benchmark (Track B)  ·  ~1–2 days
 
-- [ ] **6.1 New inference path.** Replace `run_inference_with_count()` internals (or add
-  `classify_rack()`) that: loads the full-res frame, crops the 9 ROIs from
-  `roi_config.json`, classifies each (batched), and returns the **same list of
-  detection dicts** `{ label, confidence, bbox }` (bbox = the ROI). `total_count`
-  always 9.
-- [ ] **6.2 Retire detection-era code.** Remove/retire `suppress_duplicate_tubes()`, the
-  hard-cap-9, the 50% downscale, and `iou`/`agnostic_nms`. Update the annotation drawing
-  to render the 9 ROIs + `1`/`0` labels + count.
-- [ ] **6.3 Keep downstream untouched.** `detections_to_tubes`, `tubes_to_xyz`,
-  `_compute_mpn`, DB, `/predict`, `/capture`, `/ws` (client + server), and the frontend
-  all stay as-is because the output contract is preserved. Verify class-label strings
-  still match `Yellow_Bubble`.
-- [ ] **6.4 Config & model loading.** Load the NCNN model (dir path) and
-  `roi_config.json`; resolve paths absolutely (not CWD-relative).
-- [ ] **6.5 Fold in low-risk reliability fixes** while in this code: run inference off
-  the async event loop (`asyncio.to_thread`), single shared `Camera` instance, robust
-  model path. See [ERROR_HANDLING.md](ERROR_HANDLING.md) / [STATUS.md](STATUS.md).
+- [ ] **3.1 Export NCNN:** `model.export(format="ncnn")`; verify accuracy **parity** vs
+  PyTorch on the test set.
+- [ ] **3.2 Benchmark on the Pi 5** (end-to-end capture → detect → MPN). Target the
+  ~68 ms/frame NCNN ballpark ([HARDWARE.md](HARDWARE.md)).
+- [ ] **3.3 Variant/hardware decision:** `n` vs `s` from the accuracy/latency curve;
+  optional **Hailo AI HAT+** for headroom (e.g. `s`/`m` at video rates).
 
-**Gate:** running the app over the eval set (through `/predict`) reproduces the Phase-4
-metrics — no regression from the standalone model.
+**Gate:** on-device latency + accuracy acceptable.
 
 ---
 
-## Phase 7 — On-device validation & rollout  ·  ~2–4 days
+## Phase 4 — App integration (Track B, minimal)  ·  ~1–3 days
 
-- [ ] **7.1 Deploy to the Pi** in the jig; run the **full eval set end-to-end on-device**
-  and confirm metrics + latency match the bench numbers.
-- [ ] **7.2 ROI sanity across inserts.** Re-insert the rack several times; confirm the
-  fixed ROIs still frame each tube (adjust margins / enable fiducial alignment if not).
-- [ ] **7.3 Field trial with the client.** Collect real readings and **log every
-  misread** for Phase 8.
-- [ ] **7.4 Update docs & changelog.** [INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md)
-  (new ROI-classify flow), [ARCHITECTURE.md](ARCHITECTURE.md),
-  [API_SPEC.md](API_SPEC.md) (labels/notes), [MODEL_AND_DATA.md](MODEL_AND_DATA.md),
-  [MODULES.md](MODULES.md), and [../CHANGELOG.md](../CHANGELOG.md).
+- [ ] **4.1 Swap the model** in [inference.py](../app/inference.py): point to the new
+  weights / NCNN model dir; resolve the path absolutely (not CWD-relative).
+- [ ] **4.2 NMS-free reconciliation.** YOLO26 is end-to-end, so `iou=0.6,
+  agnostic_nms=True` become no-ops (remove them). **Validate `suppress_duplicate_tubes()`
+  on real racks** — if YOLO26 emits ≤ 9 clean boxes, simplify it (keep only the
+  hard-cap-9 + left→right sort as guards); otherwise keep it, re-tuned.
+- [ ] **4.3 Reconsider the 50% downscale** ([inference.py:149-152](../app/inference.py#L149-L152))
+  — for accuracy, try full/75% res on the capture path and measure.
+- [ ] **4.4 Update the positive-label string (REQUIRED).** The new model emits
+  **`yellow_positive`**, but the code hardcodes the old `"Yellow_Bubble"` in **4 places**
+  ([inference.py:107](../app/inference.py#L107), [inference.py:203](../app/inference.py#L203),
+  [script.js:573](../static/js/script.js#L573), [script.js:984](../static/js/script.js#L984)).
+  Change them to `"yellow_positive"` — ideally via a single `POSITIVE_LABEL` constant.
+  **If missed, every tube reads 0 → MPN always `P000` (silent catastrophic bug).**
+  Everything else downstream (`tubes_to_xyz`, `_compute_mpn`, DB, `/predict`, `/capture`,
+  `/ws`, frontend) stays unchanged.
+- [ ] **4.5 Fold in low-risk reliability fixes** while here: inference off the async
+  event loop (`asyncio.to_thread`), single shared `Camera`, robust model path. See
+  [ERROR_HANDLING.md](ERROR_HANDLING.md) / [STATUS.md](STATUS.md).
+
+**Gate:** app over the eval set reproduces the standalone model's metrics (no regression).
+
+---
+
+## Phase 5 — New-jig data + retrain (convergence of tracks)  ·  ~1–2 weeks
+
+- [ ] **5.1 Collect through the new jig**, targeting the gaps: **`Yellow_NoBubble` up to
+  ~200+**, balanced `Purple` (with enough purple-bubble hard negatives), all **9
+  positions**, varied patterns. Keep the strong `Yellow_Bubble` set.
+- [ ] **5.2 Merge old + new** with a `domain` field (`old_jig` / `new_jig`) in the
+  manifest so the mix is managed and metrics can be sliced.
+- [ ] **5.3 Retrain** (fine-tune from the interim model or retrain fresh); **evaluate on
+  the new-jig eval set** — this is the real acceptance number.
+- [ ] **5.4 Re-export NCNN**, re-benchmark, redeploy the winner.
+
+**Gate:** model beats baseline on **new-jig MPN-pattern accuracy** by the agreed margin.
+
+---
+
+## Phase 6 — On-device validation & rollout  ·  ~2–4 days
+
+- [ ] **6.1 Deploy to the Pi** in the jig; run the full new-jig eval set on-device;
+  confirm metrics + latency.
+- [ ] **6.2 Field trial with the client;** log every misread for Phase 7.
+- [ ] **6.3 Update docs & changelog:** [INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md),
+  [ARCHITECTURE.md](ARCHITECTURE.md), [API_SPEC.md](API_SPEC.md),
+  [MODEL_AND_DATA.md](MODEL_AND_DATA.md), [MODULES.md](MODULES.md),
+  [../CHANGELOG.md](../CHANGELOG.md).
 
 **Gate:** client-acceptance accuracy met in the field trial.
 
 ---
 
-## Phase 8 — Continuous improvement  ·  ongoing
+## Phase 7 — Continuous improvement  ·  ongoing
 
-- [ ] **8.1 Active learning.** Log low-confidence crops (and any client-flagged
-  misreads), label them, fold into the next `dataset vX+1`, retrain, re-measure.
-- [ ] **8.2 Maintenance.** Re-run ROI calibration if the jig geometry changes; **version
-  every model + dataset**; keep only the active model tracked in the repo (retire the
-  extra `.pt` checkpoints — see [MODEL_AND_DATA.md](MODEL_AND_DATA.md)).
+- [ ] **7.1 Active learning.** Log low-confidence detections + client-flagged misreads,
+  label them, fold into the next dataset version, retrain, re-measure.
+- [ ] **7.2 Maintenance.** Version every model + dataset; retire the extra `.pt`
+  checkpoints in the repo root (keep only the active model) — see
+  [MODEL_AND_DATA.md](MODEL_AND_DATA.md).
 
 ---
 
 ## Dependency flow
 
 ```
-0 Foundations ─► 1 Collect ─► 2 Label ─► 3 Assemble ─► 4 Train/Eval
-      (jig+ROI+eval)                                        │ beats baseline?
-                                                            ▼
-                                     5 Export/NCNN ─► 6 Integrate ─► 7 On-device rollout ─► 8 Improve
+Track A:  0 Foundations (jig + new-jig eval set + baseline) ────────────────┐
+                                                                            ▼
+Track B:  1 Roboflow prep ─► 2 Train YOLO26 ─► 3 Export/NCNN ─► 4 Integrate ─► 5 New-jig retrain ─► 6 Rollout ─► 7 Improve
+                                (interim signal)                              (real acceptance)
 ```
 
-Each arrow is a gate — do not proceed until the previous phase's gate passes.
+Each arrow is a gate — do not proceed until the previous gate passes.
 
 ## Risk register
 
 | Risk | Mitigation |
 |---|---|
-| Rack insertion tolerance shifts tubes out of the ROIs | Generous ROI margins; fiducial/edge alignment; re-check across inserts (7.2) |
-| Positive class (`Yellow_Bubble`) too rare in data | Deliberate over-collection; class weights/oversampling (1.2, 3.2) |
-| Lighting drift changes "yellow" | Locked camera + controlled lighting; lighting augmentation (0.1, 4.1) |
-| NCNN export degrades accuracy | Parity check vs PyTorch before shipping (5.1) |
-| Training data not captured via the jig → domain mismatch | Mandate jig capture for all training data (1.1) |
-| Label inconsistency between annotators | Labeling guide + QC review + confusion-matrix watch (2.1, 2.4) |
-| Data leakage between splits | Split by sample, not by crop (3.3) |
+| `yellow_negative` too few (58) → weak on the key boundary | Collect ~200+ on the new jig (5.1); interpret interim numbers cautiously |
+| `purple_negative` merge hides missing purple-bubble hard negatives | Track purple-with-bubble count even within the merged class (1.1, 5.1) |
+| **Class rename `Yellow_Bubble`→`yellow_positive` not applied in code** | Update the 4 hardcoded strings via a `POSITIVE_LABEL` constant (4.4); else MPN silently always `P000` |
+| **Hue/color augmentation corrupts yellow vs purple** | `hsv_h=0.0`; no Roboflow Hue/Saturation (1.3, 2.1) |
+| Bubble erased by blur/noise/cutout | Ban those augmentations (1.3) |
+| Old-jig data ≠ new-jig domain | Bootstrap only; retrain on new-jig data (Phase 5); eval set is new-jig |
+| NCNN export degrades accuracy | Parity check vs PyTorch (3.1) |
+| NMS-free changes dedup behavior | Validate `suppress_duplicate_tubes` on real racks (4.2) |
+| Model loaded by CWD-relative path | Resolve `best.pt`/NCNN dir absolutely (4.1) |
 
 ## Notes
 
-- This plan **retires the detection pipeline** in favor of fixed-ROI classification. If
-  the jig ever cannot guarantee position, the detection fallback (Path A with
-  `yolo26s`) remains documented in [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §3.
-- Nothing here is implemented yet — it is the agreed plan. Phase 0 begins 2026-06-30.
+- This plan **keeps object detection** and swaps YOLOv8n → YOLO26. The fixed-ROI
+  classification alternative (Path B) remains documented in
+  [LABELING_STRATEGY.md](LABELING_STRATEGY.md) as a fallback if detection accuracy ever
+  plateaus.
+- Nothing here is implemented yet — it is the agreed plan. Track A begins 2026-06-30;
+  Track B (interim training on the existing Roboflow data) can start immediately.

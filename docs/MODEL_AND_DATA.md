@@ -17,13 +17,22 @@
 | Inference settings | `conf` (clamped 0.05–0.95), `iou=0.6`, `agnostic_nms=True` |
 | Export format | PyTorch `.pt` (no NCNN/ONNX export — see note below) |
 
-> **Speed note:** the model runs as a raw PyTorch `.pt`, which is the *slowest* format
-> on a Raspberry Pi (~302 ms vs ~68 ms for NCNN at 640 on a Pi 5). Exporting to
-> **NCNN** is a ~4× speedup at near-zero risk and is the recommended first
-> optimization. **Upgrading to YOLO26** (edge-first, NMS-free) is also evaluated in
-> [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) — note it requires retraining on
-> our own dataset to benefit. For the board-level comparison and benchmarks
-> (Pi 5 / Hailo / Jetson), see [HARDWARE.md](HARDWARE.md).
+> **Planned upgrade (decided 2026-06-29):** retrain as **YOLO26 object detection**
+> (`yolo26n`, compare `yolo26s`) on the existing Roboflow dataset, keeping the detection
+> architecture, and deploy via **NCNN** on a Raspberry Pi 5. NCNN alone is ~4× faster
+> than the current raw `.pt` on a Pi (~68 ms vs ~302 ms at 640).
+>
+> The new model uses a **3-class** schema with **renamed** classes:
+> `yellow_positive` (=1), `yellow_negative` (=0), `purple_negative` (=0) — replacing the
+> old 4 (`Yellow_Bubble`/…). ⚠️ The positive label changes from `Yellow_Bubble` →
+> `yellow_positive`, so the 4 hardcoded label strings in `inference.py` and `script.js`
+> must be updated at integration (see [NEXT_STEPS.md](NEXT_STEPS.md) Phase 4.4 and
+> [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §3).
+>
+> Full build plan in [NEXT_STEPS.md](NEXT_STEPS.md); label/preprocessing/augmentation
+> policy in [LABELING_STRATEGY.md](LABELING_STRATEGY.md); board comparison in
+> [HARDWARE.md](HARDWARE.md); YOLO26 evaluation in
+> [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md).
 
 The model is loaded relative to the **working directory** as `"best.pt"`, so the
 server must be started from the project root (as all run commands and scripts do).

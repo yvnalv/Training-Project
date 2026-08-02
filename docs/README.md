@@ -50,7 +50,7 @@ VialVision domain:
 | [MPN_LOOKUP_RULES.md](MPN_LOOKUP_RULES.md) | Detection→tube→pattern→MPN mapping rules |
 | [INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md) | Detect → dedup → annotate → compute |
 | [MODEL_AND_DATA.md](MODEL_AND_DATA.md) | Model weights, training data, assets |
-| [LABELING_STRATEGY.md](LABELING_STRATEGY.md) | Dataset label schema + annotation conventions for retraining |
+| [LABELING_STRATEGY.md](LABELING_STRATEGY.md) | Label schema + Roboflow preprocessing/augmentation policy for YOLO26 retraining |
 | [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) | Prioritized plan to improve accuracy + YOLO26 upgrade evaluation |
 | [HARDWARE.md](HARDWARE.md) | Hardware recommendation (Pi 5 / Hailo / Jetson) with benchmarks |
 | [CAMERA.md](CAMERA.md) | Camera abstraction and color/flip pipeline |

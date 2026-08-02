@@ -193,6 +193,14 @@ Orin Nano) and the hardware-spend recommendation, see [HARDWARE.md](HARDWARE.md)
   unnecessary (and our over-merge risk avoidable).
 
 ### 4.5 Recommended migration path
+
+> **Decision (2026-06-29):** the team is proceeding with **YOLO26 object detection**
+> (keeping the detection architecture, not the fixed-ROI classification alternative),
+> retrained on the existing Roboflow dataset and deployed via NCNN on a Pi 5. This
+> document remains the background/rationale; the committed, sequenced build plan is in
+> [NEXT_STEPS.md](NEXT_STEPS.md), with the label/preprocessing/augmentation policy in
+> [LABELING_STRATEGY.md](LABELING_STRATEGY.md).
+
 1. Finish **Tier 0.1** (labeled eval set) — required to benchmark anything.
 2. **Quick win, do now regardless of version:** export the *current* `best.pt` to
    **NCNN** and benchmark accuracy + latency on the eval set. If accuracy holds, ship

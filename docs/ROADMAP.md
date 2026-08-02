@@ -24,17 +24,20 @@ done, see [STATUS.md](STATUS.md) and [../CHANGELOG.md](../CHANGELOG.md).
 
 ## Phase 2 — Model quality & accuracy
 
-See [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) for the full prioritized plan
-(measurement, lighting/camera, fixed-ROI, retraining) and the **YOLO26** upgrade
-evaluation.
+**Committed plan (2026-06-29): retrain as YOLO26 object detection + NCNN on Pi 5.** The
+sequenced build plan is in [NEXT_STEPS.md](NEXT_STEPS.md); background/rationale in
+[ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md); label/preprocessing/augmentation
+policy in [LABELING_STRATEGY.md](LABELING_STRATEGY.md).
 
-- Build a labeled evaluation set (prerequisite for everything measurable).
+- Build a labeled **new-jig** evaluation set (prerequisite for everything measurable).
 - Control lighting and lock camera focus/exposure/white balance.
-- Export the model to **NCNN** (~4× faster on Pi, near-zero risk).
-- Curate and version the training dataset (see [MODEL_AND_DATA.md](MODEL_AND_DATA.md)).
-- Retrain / fine-tune for fewer false positives at rack edges and labels.
-- Evaluate retraining on **YOLO26n** (edge-first, NMS-free) vs the current model.
+- Retrain **YOLO26** detection (`yolo26n`, compare `yolo26s`) on the Roboflow dataset.
+- Export to **NCNN** (~4× faster on Pi, near-zero risk); validate NMS-free vs the custom
+  dedup.
+- Curate and version the training dataset (see [MODEL_AND_DATA.md](MODEL_AND_DATA.md));
+  fix the `Yellow_NoBubble` shortage.
 - Track model versions and metrics; stop committing multiple `.pt` checkpoints.
+- *(Fallback if accuracy plateaus: fixed-ROI per-tube classification.)*
 
 ## Phase 3 — Operability
 
