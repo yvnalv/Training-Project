@@ -6,6 +6,11 @@
 2. Put `best.pt` in the project root.
 3. Run the app from the **repo root** (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
+**On a new/different machine, check specs first** (GPU? CUDA torch? which env has
+YOLO26?) and follow the switching-computer checklists in
+[DEV_ENVIRONMENT.md](DEV_ENVIRONMENT.md). Model weights and the dataset are **not** in
+git — copy them manually or retrain.
+
 ## Before you start
 
 - Read [CLAUDE.md](../CLAUDE.md) for the project at a glance and the conventions that

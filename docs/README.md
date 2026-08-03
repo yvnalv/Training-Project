@@ -74,6 +74,7 @@ VialVision domain:
 | Doc | Description |
 |---|---|
 | [CODING_STANDARDS.md](CODING_STANDARDS.md) | Style and conventions |
+| [DEV_ENVIRONMENT.md](DEV_ENVIRONMENT.md) | Switching machines + "check specs first" (GPU/CUDA/env) |
 | [TESTING.md](TESTING.md) | How to verify changes |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Running on desktop and Raspberry Pi |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |

@@ -10,7 +10,8 @@ app integration → new-jig data + retrain → rollout → continuous improvemen
 Companion docs: [LABELING_STRATEGY.md](LABELING_STRATEGY.md) (label schema +
 preprocessing/augmentation policy), [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md),
 [HARDWARE.md](HARDWARE.md), [MODEL_AND_DATA.md](MODEL_AND_DATA.md),
-[INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md).
+[INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md),
+[DEV_ENVIRONMENT.md](DEV_ENVIRONMENT.md) (switching machines / check specs first).
 
 ---
 
