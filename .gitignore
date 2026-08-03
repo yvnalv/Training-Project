@@ -65,3 +65,4 @@ htmlcov/
 # ── Training artifacts (machine-specific; copy weights manually) ──
 training/data.vialvision.yaml
 training/*.log
+runs/
