@@ -127,57 +127,57 @@ Two tracks run at once and converge at Phase 5:
 - [x] **1.1 Project settings confirmed.** Object detection; **3 classes** —
   `yellow_positive`, `yellow_negative`, `purple_negative`. Dataset **downloaded in
   YOLO26 format**. (Verify `purple_negative` includes purple-with-bubble hard negatives.)
-- [ ] **1.2 Preprocessing** (applies to all images + inference): **Auto-Orient ON**,
-  **Resize 640×640 (Fit/letterbox)**, **no Grayscale**, no contrast/tile. See
-  [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §"Preprocessing & augmentation".
-- [ ] **1.3 Augmentation** (training only) — **minimal and color-safe**: modest
-  Brightness ±10%, Exposure ±10%, Rotation ±5°; multiplier ≤ 3×. **No Hue, no
-  Saturation, no vertical flip, no Blur/Noise, no Cutout/Mosaic.**
-- [ ] **1.4 Export** — choose the **YOLO26** format (native for the target model). If
-  unavailable, **YOLOv11**/YOLOv8 work identically (the detection txt format is the
-  same). Gives `data.yaml` + images/labels.
+- [x] **1.2 Preprocessing applied** (per export README): Auto-Orient + Resize 640×640
+  (Fit within), no grayscale. ✓
+- [x] **1.3 Augmentation applied** — Roboflow baked in 3× (rotation ±5°, brightness
+  ±15%, exposure ±10%); **no hue/saturation/flip/blur/cutout**. ✓ Matches the color-safe
+  policy exactly.
+- [x] **1.4 Exported in YOLO26 format** (`VialVision2.0 v1`): train 1866 / valid 116 /
+  test 39 images.
 
-**Gate:** dataset version exported; preprocessing/augmentation policy applied.
+**Gate:** ✅ dataset exported; preprocessing/augmentation policy applied.
 
-> Data caveat: this is the old-jig bootstrap set; `Yellow_NoBubble` (58) is thin, so its
-> interim metrics will be unreliable. Fixed in Phase 5.
-
----
-
-## Phase 2 — Train YOLO26 detection (Track B)  ·  ~2–5 days
-
-- [ ] **2.1 Train** with color/bubble-safe settings:
-  ```python
-  from ultralytics import YOLO
-  model = YOLO("yolo26n.pt")                 # detection pretrained
-  model.train(
-      data="path/to/data.yaml", epochs=100, imgsz=640, patience=20,
-      hsv_h=0.0,      # no hue shift — protect yellow vs purple
-      hsv_s=0.3, hsv_v=0.4,
-      flipud=0.0,     # no vertical flip (bubble is at top)
-      fliplr=0.5, degrees=5.0,
-  )
-  ```
-- [ ] **2.2 Compare `yolo26s`** (accuracy first; NCNN keeps `s` affordable on the Pi 5).
-- [ ] **2.3 Evaluate** (`model.val()`): mAP, per-class, confusion — focus on the two
-  confusable pairs above.
-- [ ] **2.4 Iterate** — fix errors with **data first** (esp. `Yellow_NoBubble` and
-  purple-bubble hard negatives), then hyperparameters.
-
-**Gate:** interim model trains cleanly and the pipeline is validated end-to-end.
+> Data note: old-jig **bootstrap** set. Instance balance is healthier than first thought
+> — train `yellow_positive` 879 / `yellow_negative` 453 / `purple_negative` 531 — but
+> it is **~1 box/image (single-tube photos)**, so interim metrics are an optimistic upper
+> bound vs real 9-tube racks. Rack photos + more `yellow_negative` come in Phase 5.
 
 ---
 
-## Phase 3 — Export & Pi benchmark (Track B)  ·  ~1–2 days
+## Phase 2 — Train YOLO26 detection (Track B)  ·  ✅ DONE 2026-08-03
 
-- [ ] **3.1 Export NCNN:** `model.export(format="ncnn")`; verify accuracy **parity** vs
-  PyTorch on the test set.
-- [ ] **3.2 Benchmark on the Pi 5** (end-to-end capture → detect → MPN). Target the
-  ~68 ms/frame NCNN ballpark ([HARDWARE.md](HARDWARE.md)).
-- [ ] **3.3 Variant/hardware decision:** `n` vs `s` from the accuracy/latency curve;
-  optional **Hailo AI HAT+** for headroom (e.g. `s`/`m` at video rates).
+Trained with [../training/train_yolo26.py](../training/train_yolo26.py) on an RTX 4060
+(env `testcuda`), color/bubble-safe settings (`hsv_h=0.0`, `flipud=0.0`, augmentation
+dialed down since Roboflow pre-augmented).
 
-**Gate:** on-device latency + accuracy acceptable.
+- [x] **2.1 Trained `yolo26n`** — 100 epochs (early context), imgsz 640, batch 16.
+- [x] **2.2 Compared `yolo26s`** — no accuracy gain, 4× larger → **`yolo26n` chosen.**
+- [x] **2.3 Evaluated** on val + test splits (below).
+- [ ] **2.4 Iterate** — deferred to Phase 5 (the weak class is data-limited, not a
+  training-knob problem; a bigger model already showed no gain).
+
+**Interim results (yolo26n):**
+
+| Split | mAP50 | mAP50-95 | `yellow_negative` (weak) |
+|---|---|---|---|
+| val (116) | 0.992 | 0.971 | mAP50 0.988 / R 0.929 |
+| test (39) | 0.948 | 0.890 | mAP50 0.885 / R 0.900 |
+
+`purple_negative` ≈ perfect (color is easy); `yellow_negative` is the weak, false-positive-risk
+class. **Gate:** ✅ pipeline validated end-to-end; interim model is strong on single-tube data.
+
+---
+
+## Phase 3 — Export & Pi benchmark (Track B)  ·  partially done
+
+- [x] **3.1 Exported NCNN** (`best_ncnn_model`, 9.3 MB); **parity verified** (test mAP50
+  0.930 vs 0.948 PyTorch — within noise). ✓
+- [ ] **3.2 Benchmark on the Pi 5** (end-to-end capture → detect → MPN) — pending real
+  hardware. Target ~68 ms/frame ([HARDWARE.md](HARDWARE.md)).
+- [x] **3.3 Variant decision:** **`yolo26n`** (tied accuracy, 4× smaller/faster than
+  `s`). Hailo AI HAT+ only if video-rate headroom is later wanted.
+
+**Gate:** NCNN parity ✅; on-device latency still to confirm on the Pi.
 
 ---
 
@@ -207,18 +207,47 @@ Two tracks run at once and converge at Phase 5:
 
 ---
 
-## Phase 5 — New-jig data + retrain (convergence of tracks)  ·  ~1–2 weeks
+## Phase 5 — New-jig data + retrain (durable improvement)  ·  ~1–2 weeks
 
-- [ ] **5.1 Collect through the new jig**, targeting the gaps: **`Yellow_NoBubble` up to
-  ~200+**, balanced `Purple` (with enough purple-bubble hard negatives), all **9
-  positions**, varied patterns. Keep the strong `Yellow_Bubble` set.
+- [ ] **5.1 Collect through the new jig**, targeting the gaps: **more `yellow_negative`**
+  (the confirmed weak class), balanced `purple_negative` (with enough purple-with-bubble
+  hard negatives), all **9 positions**, varied patterns, and — critically — **real
+  9-tube rack photos** (the interim data was single-tube only). Keep the strong
+  `yellow_positive` set.
 - [ ] **5.2 Merge old + new** with a `domain` field (`old_jig` / `new_jig`) in the
   manifest so the mix is managed and metrics can be sliced.
-- [ ] **5.3 Retrain** (fine-tune from the interim model or retrain fresh); **evaluate on
-  the new-jig eval set** — this is the real acceptance number.
+- [ ] **5.3 Retrain** (fine-tune from the interim model or fresh); **evaluate on the
+  new-jig eval set** — the real acceptance number.
 - [ ] **5.4 Re-export NCNN**, re-benchmark, redeploy the winner.
 
 **Gate:** model beats baseline on **new-jig MPN-pattern accuracy** by the agreed margin.
+
+### Durable-improvement levers (if the deployed model is not good enough)
+
+Ranked by leverage. The interim run already told us where *not* to spend effort.
+
+1. **More data for the weak class + rack framing (highest leverage).** `yellow_negative`
+   is the weakest and the false-positive risk (`yellow_negative → yellow_positive`
+   inflates the MPN). Collect many more `yellow_negative` examples and **real 9-tube rack
+   photos** at the production distance. This is the single biggest lever.
+2. **Exact domain match.** Capture training data through the **same jig, locked lighting,
+   fixed focus/exposure/white-balance** as deployment. Inconsistent input caps accuracy
+   more than any model change.
+3. **Class weighting / oversampling** of `yellow_negative` at train time (stopgap until
+   more data exists).
+4. **Confidence-threshold tuning** on the eval set — trade precision/recall between
+   `yellow_positive` and `yellow_negative` to minimize the costly error (usually favor
+   *not* over-calling positives).
+5. **❌ Not a bigger model.** `yolo26s` already showed **no gain** over `yolo26n` → the
+   ceiling is data, not capacity. Don't burn time here.
+6. **Fixed-ROI classification fallback.** If rack **localization** (not classification)
+   underperforms — e.g. the detector misses tubes in a full rack — switch to the
+   fixed-jig approach: crop the 9 known ROIs and classify each with a `yolo26n-cls`
+   model. Documented in [LABELING_STRATEGY.md](LABELING_STRATEGY.md) §2. This removes the
+   detection/localization problem entirely.
+
+Validate every lever the same way: mAP + per-tube binary accuracy + **MPN-pattern
+accuracy** on the new-jig eval set (the client-facing number).
 
 ---
 

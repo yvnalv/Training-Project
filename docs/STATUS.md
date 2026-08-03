@@ -1,15 +1,16 @@
 # Project Status
 
-_Last updated: 2026-06-29_
+_Last updated: 2026-08-03_
 
 ## Snapshot
 
 VialVision is a **working, deployed prototype**. The full end-to-end flow —
 image/stream → YOLO detection → MPN computation → result display → history — is
-functional on both desktop and Raspberry Pi. Recent work focused on Raspberry Pi
-deployment robustness (camera color/zoom, autostart, settings persistence).
+functional on both desktop and Raspberry Pi. Current focus is a **model upgrade**
+(YOLOv8n → YOLO26 object detection) to improve prediction accuracy; an interim YOLO26n
+has been trained and exported to NCNN (not yet integrated into the app).
 
-Current branch: `fixing-upload-button`.
+Current branch: `Refactor-Yolo26`.
 
 ## Where we are
 
@@ -30,6 +31,14 @@ Current branch: `fixing-upload-button`.
 
 ## Recently completed (newest first)
 
+- **2026-08-03** — Trained interim **YOLO26n** object detector on the Roboflow dataset
+  (3 classes: `yellow_positive`/`yellow_negative`/`purple_negative`) on an RTX 4060.
+  Val mAP50 **0.992**, test mAP50 **0.948**; `yolo26n` chosen over `yolo26s` (tied
+  accuracy, 4× smaller). Exported to **NCNN**, parity verified. `yellow_negative` is the
+  weakest class → data-limited (see durable-improvement levers in
+  [NEXT_STEPS.md](NEXT_STEPS.md) Phase 5). **Not yet integrated into the app.**
+- **2026-06-29** — Finalized the YOLO26 object-detection plan, 3-class label schema,
+  Roboflow preprocessing/augmentation policy; added `training/` scripts.
 - **2026-04-19** — RPi autostart, DB-backed settings persistence, Pi camera color
   (BGR/RGB) fix, full-sensor zoom-out + sharpness + autofocus, network-IP display.
 - **2026-04-16** — Added missing WebSocket deps; greedy-NMS dedup with hard cap of 9;
@@ -42,15 +51,22 @@ See [../CHANGELOG.md](../CHANGELOG.md) for the complete history.
 
 ## What's next
 
-**Active focus: prediction accuracy** (client-reported). Decided 2026-06-29: **upgrade
-YOLOv8n → YOLO26, keeping object detection**, retrain on the existing Roboflow dataset,
-and deploy via **NCNN on a Raspberry Pi 5**. The sequenced, gated build plan (two
-parallel tracks — design-team jig/eval set + interim modeling) is in
-**[NEXT_STEPS.md](NEXT_STEPS.md)**; label/preprocessing/augmentation policy in
-[LABELING_STRATEGY.md](LABELING_STRATEGY.md); background/tradeoffs in
+**Active focus: prediction accuracy** (client-reported). Upgrading YOLOv8n → **YOLO26
+object detection**, deployed via **NCNN on a Raspberry Pi 5**. Full plan in
+**[NEXT_STEPS.md](NEXT_STEPS.md)**.
+
+Immediate next steps:
+
+1. **App integration (Phase 4)** — wire `best_ncnn_model` into `inference.py` and
+   **rename the positive label `Yellow_Bubble` → `yellow_positive`** (4 places; else MPN
+   silently reads `P000`). Then run the first **real 9-tube rack** test.
+2. **New-jig data + retrain (Phase 5)** — collect more `yellow_negative` + real rack
+   photos to lift the weak class; see the **durable-improvement levers** in
+   [NEXT_STEPS.md](NEXT_STEPS.md) Phase 5.
+
+Supporting docs: label/preprocessing/augmentation policy in
+[LABELING_STRATEGY.md](LABELING_STRATEGY.md); background in
 [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md); hardware in [HARDWARE.md](HARDWARE.md).
-**Track A (jig + new-jig eval set) starts 2026-06-30**; Track B (interim training on the
-current data) can start now.
 
 Other near-term candidates (see [ROADMAP.md](ROADMAP.md)):
 

@@ -54,9 +54,11 @@ def main():
     model = YOLO(args.model)
 
     # ---- Color/bubble-safe augmentation policy (docs/LABELING_STRATEGY.md §5) ----
-    # hsv_h=0.0  -> NO hue shift (protect yellow vs purple). Do not change.
-    # flipud=0.0 -> NO vertical flip (a bubble sits at the top of the tube).
-    # Modest saturation/brightness/rotation only; horizontal flip is geometrically safe.
+    # The Roboflow export is ALREADY augmented (3x: rotation +/-5, brightness +/-15%,
+    # exposure +/-10%), so Ultralytics' built-in augmentation is dialed DOWN here to
+    # avoid double-augmenting. Non-negotiables:
+    #   hsv_h=0.0  -> NO hue shift (protect yellow vs purple).
+    #   flipud=0.0 -> NO vertical flip (a bubble sits at the top of the tube).
     train_kwargs = dict(
         data=str(data_path),
         epochs=args.epochs,
@@ -64,15 +66,15 @@ def main():
         batch=args.batch,
         patience=args.patience,
         name=args.name,
-        hsv_h=0.0,
-        hsv_s=0.3,
-        hsv_v=0.4,
-        flipud=0.0,
-        fliplr=0.5,
-        degrees=5.0,
+        hsv_h=0.0,      # never change — hue shift corrupts yellow vs purple
+        hsv_s=0.2,      # modest (Roboflow did not touch saturation)
+        hsv_v=0.2,      # reduced — Roboflow already applied brightness/exposure
+        flipud=0.0,     # no vertical flip
+        fliplr=0.5,     # horizontal flip is geometrically safe
+        degrees=0.0,    # Roboflow already applied +/-5 rotation
         translate=0.05,
         scale=0.2,
-        mosaic=1.0,     # Ultralytics mosaic; disable (0.0) if it hurts on this data
+        mosaic=0.5,     # moderate; dataset is already pre-augmented
     )
     if args.device is not None:
         train_kwargs["device"] = args.device

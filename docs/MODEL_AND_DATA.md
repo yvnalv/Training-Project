@@ -37,6 +37,37 @@
 The model is loaded relative to the **working directory** as `"best.pt"`, so the
 server must be started from the project root (as all run commands and scripts do).
 
+## Trained models (interim — 2026-08-03)
+
+First YOLO26 retraining on the Roboflow dataset (`VialVision2.0 v1`, 3 classes). Trained
+on an RTX 4060 (env `testcuda`: ultralytics 8.4.115, torch 2.5.1+cu121) via
+[../training/train_yolo26.py](../training/train_yolo26.py).
+
+| Model | Val mAP50 | Val mAP50-95 | Test mAP50 | Size | Chosen |
+|---|---|---|---|---|---|
+| **yolo26n** | 0.992 | 0.971 | **0.948** | 5.3 MB | ✅ |
+| yolo26s | 0.994 | 0.974 | 0.911 | 20 MB | — (no accuracy gain, 4× larger) |
+
+Per-class (yolo26n, test split): `purple_negative` 0.995, `yellow_positive` 0.963,
+**`yellow_negative` 0.885** — the weakest class and the false-positive risk. NCNN parity:
+test mAP50 0.930 (acceptable). Bigger model gave no gain → **accuracy is data-limited, not
+capacity-limited.**
+
+**Artifact locations** (⚠️ `runs/` is **gitignored** — these are NOT in the repo; copy
+manually to move between machines):
+
+| Artifact | Path |
+|---|---|
+| **NCNN model (for the Pi)** | `runs/detect/vialvision_yolo26/weights/best_ncnn_model/` — load via `YOLO(".../best_ncnn_model")` |
+| PyTorch weights (winner) | `runs/detect/vialvision_yolo26/weights/best.pt` |
+| Comparison run (yolo26s) | `runs/detect/vialvision_yolo26s/weights/best.pt` |
+| Metrics/plots (confusion matrix, curves) | `runs/detect/vialvision_yolo26/` |
+| Local training data config (gitignored) | `training/data.vialvision.yaml` |
+
+Caveat: trained on **single-tube** photos (~1 box/image); real 9-tube rack performance is
+still pending validation. See [NEXT_STEPS.md](NEXT_STEPS.md) Phase 5 for the
+durable-improvement plan.
+
 ## Detection classes
 
 The trained model emits tube classes. The only one that maps to a **positive** tube

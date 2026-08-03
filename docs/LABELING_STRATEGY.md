@@ -194,10 +194,16 @@ the final set. Dataset already downloaded from Roboflow in **YOLO26** format. Se
 
 `yellow_positive` vs `yellow_negative` (same color, differ only by bubble) is the
 **hardest and most consequential** boundary — errors here are the client-facing false
-pos/neg. `yellow_negative` at **58** is too thin.
-- **Top priority for new-jig collection: `yellow_negative` → ~200+.**
+pos/neg. **Confirmed empirically:** in the interim YOLO26n training (2026-08-03),
+`yellow_negative` was the **weakest class** (test mAP50 0.885 / recall 0.900) while
+`purple_negative` was near-perfect and `yellow_positive` strong. A bigger model
+(`yolo26s`) gave no gain — so the fix is **data, not capacity**.
+- **Top priority for new-jig collection: many more `yellow_negative` examples** (the
+  `VialVision2.0 v1` export had 453 train instances — better than the earlier 58, but
+  still the limiting class).
 - Ensure `purple_negative` has enough **purple-with-bubble** hard negatives.
-- Keep the strong `yellow_positive` set; cover all **9 positions**.
+- Keep the strong `yellow_positive` set; cover all **9 positions**; add **real 9-tube
+  rack photos** (interim data was single-tube only).
 - Consider class weights / oversampling at train time as a stopgap, but collect real
   data.
 
