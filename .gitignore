@@ -69,3 +69,4 @@ runs/
 models/
 test_images/*_annotated.jpg
 test_images/*_OLDMODEL.jpg
+test_images/*_RACKMODEL.jpg

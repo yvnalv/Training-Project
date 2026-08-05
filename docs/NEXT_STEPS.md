@@ -15,13 +15,21 @@ preprocessing/augmentation policy), [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEME
 
 ---
 
-## ⚠️ Key finding (2026-08-04): rack detection needs rack training data
+## ✅ RESOLVED (2026-08-04): rack detection works after rack-inclusive retrain
+
+**Fixed.** Retraining YOLO26n on `VialVision2.0 **v2**` (rack images added to the
+single-tube data; racks in train/valid/test) made it detect **9 tubes on all 5 real
+rack photos → MPN end-to-end** (val mAP50 0.966). NCNN exported, model swapped into the
+app (`models/`). Remaining refinement: classification accuracy on the
+`yellow_positive ↔ yellow_negative` boundary (recall ~0.73) — a data problem (Phase 5).
+
+**The finding that led here** (kept for context):
 
 The interim YOLO26n (trained on the **single-tube-only** `VialVision2.0 v1` dataset)
-**cannot localize tubes in a real 9-tube rack** — on the 5 test racks it drew only 1–2
+**could not localize tubes in a real 9-tube rack** — on the 5 test racks it drew only 1–2
 boxes, each spanning a *cluster* of tubes, never 9. The old `best.pt` (trained on rack
-images) detects **9/9** on the same photos. **Conclusion: detection is the right
-approach; the model just needs rack images in its training set.**
+images) detected **9/9** on the same photos. **Conclusion: detection was the right
+approach; the model just needed rack images in its training set.**
 
 **Corrected data plan:**
 - Annotate ~70–79 real **9-tube rack photos** (9 boxes each, 3 classes) and **add them to

@@ -37,11 +37,30 @@
 The model is loaded relative to the **working directory** as `"best.pt"`, so the
 server must be started from the project root (as all run commands and scripts do).
 
-## Trained models (interim — 2026-08-03)
+## Trained models
 
-First YOLO26 retraining on the Roboflow dataset (`VialVision2.0 v1`, 3 classes). Trained
-on an RTX 4060 (env `testcuda`: ultralytics 8.4.115, torch 2.5.1+cu121) via
+Trained on an RTX 4060 (env `testcuda`: ultralytics 8.4.115, torch 2.5.1+cu121) via
 [../training/train_yolo26.py](../training/train_yolo26.py).
+
+### Active — YOLO26n on `VialVision2.0 v2` (rack-inclusive, 2026-08-04)
+
+The current app model. Adds ~70–79 annotated **9-tube rack** photos to the single-tube
+data (racks in train/valid/test). **Val mAP50 0.966**; **detects 9 tubes on all 5 real
+rack photos** → MPN end-to-end. Per-class val: `purple_negative` 0.995, `yellow_positive`
+0.98, **`yellow_negative` 0.906 (recall 0.73 — weak, the refinement target)**.
+
+Artifacts (gitignored; copy manually):
+- **App model:** `models/best_ncnn_model/` (NCNN) + `models/vialvision_yolo26.pt`
+- Training run: `runs/detect/vialvision_yolo26_rack/`
+
+> Why this fixed it: the earlier `v1` model (below) was trained on **single-tube photos
+> only**, so it couldn't localize tubes in a full rack (1–2 clustered boxes). Adding rack
+> images fixed localization — detection was always the right approach.
+
+### Earlier — YOLO26n on `VialVision2.0 v1` (single-tube only, 2026-08-03)
+
+First YOLO26 retraining (single-tube data). Strong on single tubes but **fails on real
+racks** (superseded by v2 above).
 
 | Model | Val mAP50 | Val mAP50-95 | Test mAP50 | Size | Chosen |
 |---|---|---|---|---|---|

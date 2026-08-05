@@ -31,6 +31,12 @@ Current branch: `Refactor-Yolo26`.
 
 ## Recently completed (newest first)
 
+- **2026-08-04** — ✅ **Rack detection working.** Retrained YOLO26n on the rack-inclusive
+  dataset (`VialVision2.0 v2`, racks in train/valid/test): val mAP50 **0.966**. All 5 real
+  rack photos now detect **9 tubes → MPN** through the full app pipeline (the interim
+  single-tube model managed only 1–2). Exported NCNN, swapped into the app (`models/`).
+  Remaining refinement: classification on the `yellow_positive ↔ yellow_negative`
+  boundary (recall ~0.73) — a data problem, see [NEXT_STEPS.md](NEXT_STEPS.md) Phase 5.
 - **2026-08-04** — Wired the trained model into the app (`models/` dir + NCNN/`.pt`
   resolution, `Yellow_Bubble → yellow_positive` rename) and **tested on real 9-tube
   racks**. Interim YOLO26n **fails to localize racks** (1–2 clustered boxes/rack).
@@ -64,14 +70,15 @@ object detection**, deployed via **NCNN on a Raspberry Pi 5**. Full plan in
 
 Immediate next steps:
 
-1. **Build a rack-inclusive dataset (in progress)** — annotating ~70–79 real 9-tube rack
-   photos (9 boxes each, 3 classes) and **adding them to the existing single-tube
-   Roboflow dataset**. Ensure racks land in **valid + test** (not just train), so metrics
-   reflect real rack performance this time.
-2. **Retrain YOLO26** on the mixed (rack + single-tube) dataset → export NCNN → re-test on
-   held-out racks.
-3. **App integration is already done** (Phase 4: `models/` wiring + `yellow_positive`
-   rename); it just needs the rack-capable model dropped in.
+1. **Improve classification accuracy** — `yellow_negative` is the weak class (recall
+   ~0.73) and drives the occasional wrong pattern (e.g. an unusual `P232`). The fix is
+   more `yellow_negative` + clear positive/negative rack examples, plus good jig
+   lighting for the bubble-vs-no-bubble call. See the durable-improvement levers in
+   [NEXT_STEPS.md](NEXT_STEPS.md) Phase 5.
+2. **On-device (Pi) validation** — deploy the NCNN model to the Pi 5, `pip install ncnn`,
+   confirm 9-tube detection + latency in the real setup.
+3. **Rack-only eval metric** — measure on the 8 rack test images specifically (overall
+   test mAP is inflated by the single-tube images).
 
 Supporting docs: label/preprocessing/augmentation policy in
 [LABELING_STRATEGY.md](LABELING_STRATEGY.md); background in
