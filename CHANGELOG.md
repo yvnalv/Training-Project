@@ -5,6 +5,31 @@ Each entry includes the date, what changed, the problem it solved, and how it wa
 
 ---
 
+## [2026-08-04] YOLO26 model integration (interim) + rack-detection finding
+**Branch:** `Refactor-Yolo26`
+
+**What changed:**
+- `app/inference.py`: load the trained YOLO26 model from a stable `models/` directory
+  (prefers `best_ncnn_model/` when the `ncnn` runtime is available, else
+  `vialvision_yolo26.pt`), resolved by absolute path. Added `POSITIVE_LABEL =
+  "yellow_positive"` as the single source of truth and replaced the hardcoded
+  `"Yellow_Bubble"` in the tube-mapping and drawing code.
+- `static/js/script.js`: renamed the two positive-label checks `Yellow_Bubble →
+  yellow_positive`.
+- `.gitignore`: ignore `models/` and throwaway `test_images/*_annotated.jpg` outputs.
+
+**Problem it solved:** the new 3-class YOLO26 model emits `yellow_positive`; the app
+still keyed the positive tube off the old `Yellow_Bubble` string, which would have made
+every tube read 0 (MPN always `P000`).
+
+**Finding (not a code issue):** on real 9-tube racks the interim YOLO26n localizes only
+1–2 clustered boxes, never 9 — because its dataset (`VialVision2.0 v1`) is single-tube
+only. The old `best.pt` (trained on rack images) detects 9/9. Next step: retrain YOLO26
+on a rack-inclusive dataset (see `docs/NEXT_STEPS.md`). Integration code is correct and
+stays; it just needs the rack-capable model.
+
+---
+
 ## [2026-04-19] RPi autostart, settings persistence, camera fixes, network IP
 **Branch:** `fixing-upload-button`
 **Date:** 2026-04-19

@@ -66,3 +66,6 @@ htmlcov/
 training/data.vialvision.yaml
 training/*.log
 runs/
+models/
+test_images/*_annotated.jpg
+test_images/*_OLDMODEL.jpg

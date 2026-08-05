@@ -15,6 +15,27 @@ preprocessing/augmentation policy), [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEME
 
 ---
 
+## ⚠️ Key finding (2026-08-04): rack detection needs rack training data
+
+The interim YOLO26n (trained on the **single-tube-only** `VialVision2.0 v1` dataset)
+**cannot localize tubes in a real 9-tube rack** — on the 5 test racks it drew only 1–2
+boxes, each spanning a *cluster* of tubes, never 9. The old `best.pt` (trained on rack
+images) detects **9/9** on the same photos. **Conclusion: detection is the right
+approach; the model just needs rack images in its training set.**
+
+**Corrected data plan:**
+- Annotate ~70–79 real **9-tube rack photos** (9 boxes each, 3 classes) and **add them to
+  the existing single-tube Roboflow dataset** (mixing 1-tube + rack is the proven recipe).
+- **Put racks in valid + test**, not only train — the earlier single-tube-only test split
+  gave a misleadingly high 0.95 mAP that did not reflect rack reality.
+- Ensure `yellow_negative` and varied patterns are well represented across the racks.
+- Retrain YOLO26 on the mixed dataset → export NCNN → **re-test on held-out racks**.
+
+App integration (Phase 4) is **already done** (`models/` wiring + `yellow_positive`
+rename) and correct; it just needs the rack-capable model.
+
+---
+
 ## Decisions locked (discussion 2026-06-29)
 
 | # | Decision |

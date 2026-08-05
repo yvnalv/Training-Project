@@ -31,6 +31,13 @@ Current branch: `Refactor-Yolo26`.
 
 ## Recently completed (newest first)
 
+- **2026-08-04** — Wired the trained model into the app (`models/` dir + NCNN/`.pt`
+  resolution, `Yellow_Bubble → yellow_positive` rename) and **tested on real 9-tube
+  racks**. Interim YOLO26n **fails to localize racks** (1–2 clustered boxes/rack).
+  **Root cause: the `VialVision2.0 v1` dataset is single-tube-only** — the old `best.pt`
+  (trained on rack images) detects **9/9** on the same photos. So detection is the right
+  approach; the fix is a **rack-inclusive training set**. Annotating ~70–79 rack photos
+  now. See [NEXT_STEPS.md](NEXT_STEPS.md).
 - **2026-08-03** — Trained interim **YOLO26n** object detector on the Roboflow dataset
   (3 classes: `yellow_positive`/`yellow_negative`/`purple_negative`) on an RTX 4060.
   Val mAP50 **0.992**, test mAP50 **0.948**; `yolo26n` chosen over `yolo26s` (tied
@@ -57,12 +64,14 @@ object detection**, deployed via **NCNN on a Raspberry Pi 5**. Full plan in
 
 Immediate next steps:
 
-1. **App integration (Phase 4)** — wire `best_ncnn_model` into `inference.py` and
-   **rename the positive label `Yellow_Bubble` → `yellow_positive`** (4 places; else MPN
-   silently reads `P000`). Then run the first **real 9-tube rack** test.
-2. **New-jig data + retrain (Phase 5)** — collect more `yellow_negative` + real rack
-   photos to lift the weak class; see the **durable-improvement levers** in
-   [NEXT_STEPS.md](NEXT_STEPS.md) Phase 5.
+1. **Build a rack-inclusive dataset (in progress)** — annotating ~70–79 real 9-tube rack
+   photos (9 boxes each, 3 classes) and **adding them to the existing single-tube
+   Roboflow dataset**. Ensure racks land in **valid + test** (not just train), so metrics
+   reflect real rack performance this time.
+2. **Retrain YOLO26** on the mixed (rack + single-tube) dataset → export NCNN → re-test on
+   held-out racks.
+3. **App integration is already done** (Phase 4: `models/` wiring + `yellow_positive`
+   rename); it just needs the rack-capable model dropped in.
 
 Supporting docs: label/preprocessing/augmentation policy in
 [LABELING_STRATEGY.md](LABELING_STRATEGY.md); background in

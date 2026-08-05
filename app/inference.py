@@ -14,8 +14,38 @@ logger = logging.getLogger(__name__)
 # of where the server is started from.
 _FONT_PATH = Path(__file__).parent / "fonts" / "DejaVuSans-Bold.ttf"
 
-# Load the model once at import time (downloads automatically if not found)
-model = YOLO("best.pt")
+# The positive tube class emitted by the YOLO26 model. Everything else -> 0.
+# Single source of truth (renamed from the old "Yellow_Bubble" — see CHANGELOG /
+# docs/LABELING_STRATEGY.md). If the model's class name changes, change it here only.
+POSITIVE_LABEL = "yellow_positive"
+
+# Model location, resolved absolutely from this file so it works regardless of the
+# directory uvicorn is started from. Prefer the NCNN model (fast on the Pi) when the
+# ncnn runtime is installed; otherwise use the PyTorch weights (fine on a dev machine).
+_MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+_NCNN_DIR = _MODELS_DIR / "best_ncnn_model"
+_PT_PATH = _MODELS_DIR / "vialvision_yolo26.pt"
+
+
+def _resolve_model_path() -> str:
+    if _NCNN_DIR.exists():
+        try:
+            import ncnn  # noqa: F401 — is the NCNN runtime available?
+            logger.info("Using NCNN model at %s", _NCNN_DIR)
+            return str(_NCNN_DIR)
+        except Exception:
+            logger.info("ncnn runtime not installed; falling back to PyTorch weights.")
+    if _PT_PATH.exists():
+        logger.info("Using PyTorch model at %s", _PT_PATH)
+        return str(_PT_PATH)
+    raise FileNotFoundError(
+        f"No model found in {_MODELS_DIR}. Copy the trained model there "
+        f"(vialvision_yolo26.pt and/or best_ncnn_model/) — see docs/DEV_ENVIRONMENT.md."
+    )
+
+
+# Load the model once at import time.
+model = YOLO(_resolve_model_path())
 
 
 # ---------------------------------------------------------------------------
@@ -98,13 +128,13 @@ def detections_to_tubes(detections):
     Convert ordered detections (left -> right) into 9 tube values (0/1).
 
     Rule:
-      Yellow_Bubble   -> 1 (positive)
+      yellow_positive -> 1 (positive)
       otherwise       -> 0 (negative)
 
     Raises:
         ValueError: if the number of detections is not exactly 9.
     """
-    tubes = [1 if d["label"] == "Yellow_Bubble" else 0 for d in detections]
+    tubes = [1 if d["label"] == POSITIVE_LABEL else 0 for d in detections]
 
     if len(tubes) != 9:
         raise ValueError(f"Expected 9 tubes, got {len(tubes)}")
@@ -200,7 +230,7 @@ def run_inference_with_count(image_bytes: bytes, conf: float = 0.4):
     for det in detections:
         x1, y1, x2, y2 = map(int, det["bbox"])
 
-        if det["label"] == "Yellow_Bubble":
+        if det["label"] == POSITIVE_LABEL:
             label_text, color = "1", (0, 180, 0)
         else:
             label_text, color = "0", (120, 120, 120)
