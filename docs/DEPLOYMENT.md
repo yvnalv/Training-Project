@@ -178,9 +178,14 @@ curl -s https://vialvision.yvnalvworks.com/health     # {"status":"ok",...}
 ### Rollback
 *Actions → Deploy → Run workflow →* enter a previous image `tag` or git SHA.
 
+### Networking (this VPS)
+The container joins the existing nginx network **`app_default`** and is reached by name
+`vialvision-app:8000` — **no host port is published**. nginx routes
+`vialvision.yvnalvworks.com` → `http://vialvision-app:8000` (see the server block in the
+proxy config). The cert (`/etc/letsencrypt/live/yvnalvworks.com/`) was expanded to include
+the subdomain via `certbot --standalone` with nginx stop/start hooks.
+
 ### Environment variables (`docker-compose.prod.yml`)
 | Var | Default | Purpose |
 |---|---|---|
 | `VIALVISION_TAG` | `latest` | Image tag to run (set by the deploy workflow) |
-| `VIALVISION_PORT` | `8095` | Host port the proxy forwards to |
-| `VIALVISION_BIND` | `127.0.0.1` | Bind address (localhost = not publicly exposed) |
