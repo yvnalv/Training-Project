@@ -114,3 +114,73 @@ curl -k https://<host>:8000/health   # {"status":"ok","model":"best.pt"}
 
 Common issues are tabulated in [../Setup.md](../Setup.md#troubleshooting) and
 [ERROR_HANDLING.md](ERROR_HANDLING.md).
+
+---
+
+## VPS deployment (Docker + CI/CD)
+
+A **separate** deployment (does not replace the Pi appliance): a public web version where
+users use their **device camera** (client mode) or upload photos. Pattern mirrors the
+AccounTrack project — build once in CI, ship a prebuilt image to the VPS.
+
+### How it works
+
+```
+push to main ──► GitHub Actions: build image ──► push to GHCR
+                                                    │
+                                SSH into VPS ◄──────┘
+                                docker compose -f docker-compose.prod.yml pull && up -d
+```
+
+The **VPS builds nothing** — it pulls the ready image. The trained model is **baked into
+the image** (`models/vialvision_yolo26.pt`, committed to git), so builds are reproducible
+and a **model update = commit new weights + push** (CI rebuilds and redeploys).
+
+### Files
+- `Dockerfile` — the app image (CPU torch + headless OpenCV + model).
+- `docker-compose.prod.yml` — **pulls** `ghcr.io/yvnalv/vialvision`, `mem_limit: 1g`,
+  publishes a host port, persists `data/` in a volume.
+- `.github/workflows/deploy.yml` — build → push GHCR → SSH deploy (also manual via
+  *Actions → Deploy → Run workflow*).
+
+### TLS & routing — your existing reverse proxy
+TLS + subdomain routing are **not** in this stack. Your VPS's existing reverse proxy
+terminates HTTPS (Let's Encrypt) and forwards `vialvision.yvnalvworks.com` to the
+container. Two wiring options:
+- **Host-level proxy** (Nginx / Caddy / Nginx Proxy Manager on the host): keep the
+  compose `ports` (`127.0.0.1:8095:8000`) and point the proxy at `http://127.0.0.1:8095`.
+- **Dockerized proxy**: remove `ports`, attach `app` to the proxy's external network, and
+  route by container name `vialvision-app:8000`.
+
+A real cert also means the **phone live camera works with no warning**.
+
+### One-time VPS setup
+1. Docker + Compose installed; your reverse proxy already running.
+2. Create the app dir (`VPS_APP_DIR`), put `docker-compose.prod.yml` there (copy or
+   `git clone`).
+3. **GHCR login** (image is private):
+   `echo <GHCR_PAT> | docker login ghcr.io -u yvnalv --password-stdin`
+   (PAT needs `read:packages`).
+4. **Reverse proxy:** add `vialvision.yvnalvworks.com` → `http://127.0.0.1:8095` (or the
+   container).
+5. **GitHub secrets** (repo → Settings → Secrets → Actions): `VPS_HOST`, `VPS_USER`,
+   `VPS_SSH_KEY` (a private key whose public half is in the VPS user's
+   `~/.ssh/authorized_keys`), `VPS_APP_DIR`.
+6. **RAM:** the app needs ~400 MiB. On a 1 GB box, **stop other apps first** (e.g.
+   `docker stop n8n` / pause the relevant compose) to free memory.
+
+### First deploy
+Set up the VPS + secrets, then merge to `main` (or run the workflow manually). Verify:
+```bash
+curl -s https://vialvision.yvnalvworks.com/health     # {"status":"ok",...}
+```
+
+### Rollback
+*Actions → Deploy → Run workflow →* enter a previous image `tag` or git SHA.
+
+### Environment variables (`docker-compose.prod.yml`)
+| Var | Default | Purpose |
+|---|---|---|
+| `VIALVISION_TAG` | `latest` | Image tag to run (set by the deploy workflow) |
+| `VIALVISION_PORT` | `8095` | Host port the proxy forwards to |
+| `VIALVISION_BIND` | `127.0.0.1` | Bind address (localhost = not publicly exposed) |

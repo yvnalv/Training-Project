@@ -66,7 +66,10 @@ htmlcov/
 training/data.vialvision.yaml
 training/*.log
 runs/
-models/
+# Ignore the models dir EXCEPT the deployed weights (baked into the Docker image
+# by CI — kept in git so builds are reproducible). NCNN dir stays out (Pi-only).
+models/*
+!models/vialvision_yolo26.pt
 test_images/*_annotated.jpg
 test_images/*_OLDMODEL.jpg
 test_images/*_RACKMODEL.jpg

@@ -1,0 +1,28 @@
+# VialVision — PRODUCTION stack (VPS). Pulls the prebuilt image from GHCR; builds nothing.
+#
+#   export VIALVISION_TAG=latest
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# TLS + subdomain routing (vialvision.yvnalvworks.com) are handled by your EXISTING
+# reverse proxy in front of this stack — not here. This container serves plain HTTP on
+# 8000, published to a host port your proxy forwards to. See docs/DEPLOYMENT.md.
+name: vialvision
+
+services:
+  app:
+    image: ghcr.io/yvnalv/vialvision:${VIALVISION_TAG:-latest}
+    container_name: vialvision-app
+    restart: unless-stopped
+    mem_limit: 1g               # measured ~400 MiB peak; 1g is safe headroom
+    # Publish to the host for a host-level proxy (Nginx/Caddy/NPM). Bound to localhost
+    # by default so it is NOT exposed publicly — only the proxy reaches it.
+    # If your proxy runs in Docker, remove this and attach to the proxy network instead
+    # (see docs/DEPLOYMENT.md).
+    ports:
+      - "${VIALVISION_BIND:-127.0.0.1}:${VIALVISION_PORT:-8095}:8000"
+    volumes:
+      - vialvision-data:/app/data     # persist SQLite DB + annotated result images
+
+volumes:
+  vialvision-data:
