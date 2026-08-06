@@ -1,0 +1,29 @@
+# VialVision — PRODUCTION stack (VPS). Pulls the prebuilt image from GHCR; builds nothing.
+#
+#   export VIALVISION_TAG=latest
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# The container joins your existing nginx network (app_default) and is reached by name
+# (vialvision-app:8000). Your nginx terminates TLS and routes vialvision.yvnalvworks.com
+# to it — no host port is published. See docs/DEPLOYMENT.md.
+name: vialvision
+
+services:
+  app:
+    image: ghcr.io/yvnalv/vialvision:${VIALVISION_TAG:-latest}
+    container_name: vialvision-app       # nginx proxies to http://vialvision-app:8000
+    restart: unless-stopped
+    mem_limit: 1g                         # measured ~400 MiB peak; 1g is safe headroom
+    volumes:
+      - vialvision-data:/app/data         # persist SQLite DB + annotated result images
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: app_default                     # the network your nginx container is on
+
+volumes:
+  vialvision-data:
