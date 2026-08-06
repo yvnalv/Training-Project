@@ -570,7 +570,7 @@ function updateTable(detections, tableId) {
         })
         .slice(0, 9)
         .forEach(d => {
-            const value = d.label === 'Yellow_Bubble' ? 1 : 0;
+            const value = d.label === 'yellow_positive' ? 1 : 0;
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${d.label}</td>
@@ -981,7 +981,7 @@ function _renderModalTable(detections) {
         });
 
     sorted.forEach((d, i) => {
-        const value = d.label === 'Yellow_Bubble' ? 1 : 0;
+        const value = d.label === 'yellow_positive' ? 1 : 0;
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${i + 1}</td>

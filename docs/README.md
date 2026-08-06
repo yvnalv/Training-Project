@@ -36,6 +36,7 @@ VialVision domain:
 | Doc | Description |
 |---|---|
 | [STATUS.md](STATUS.md) | Where we are, milestones, what's next |
+| [NEXT_STEPS.md](NEXT_STEPS.md) | Sequenced, gated action plan for the accuracy work |
 | [PRD.md](PRD.md) | Product requirements — goals, scope, users |
 | [ROADMAP.md](ROADMAP.md) | Phased plan of future work |
 | [DECISIONS.md](DECISIONS.md) | Log of significant decisions |
@@ -49,6 +50,9 @@ VialVision domain:
 | [MPN_LOOKUP_RULES.md](MPN_LOOKUP_RULES.md) | Detection→tube→pattern→MPN mapping rules |
 | [INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md) | Detect → dedup → annotate → compute |
 | [MODEL_AND_DATA.md](MODEL_AND_DATA.md) | Model weights, training data, assets |
+| [LABELING_STRATEGY.md](LABELING_STRATEGY.md) | Label schema + Roboflow preprocessing/augmentation policy for YOLO26 retraining |
+| [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) | Prioritized plan to improve accuracy + YOLO26 upgrade evaluation |
+| [HARDWARE.md](HARDWARE.md) | Hardware recommendation (Pi 5 / Hailo / Jetson) with benchmarks |
 | [CAMERA.md](CAMERA.md) | Camera abstraction and color/flip pipeline |
 | [STREAMING.md](STREAMING.md) | WebSocket protocol and message contracts |
 
@@ -70,6 +74,7 @@ VialVision domain:
 | Doc | Description |
 |---|---|
 | [CODING_STANDARDS.md](CODING_STANDARDS.md) | Style and conventions |
+| [DEV_ENVIRONMENT.md](DEV_ENVIRONMENT.md) | Switching machines + "check specs first" (GPU/CUDA/env) |
 | [TESTING.md](TESTING.md) | How to verify changes |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Running on desktop and Raspberry Pi |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |

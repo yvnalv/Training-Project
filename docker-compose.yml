@@ -1,0 +1,36 @@
+# VialVision — local Docker stack (app + nginx TLS).
+#
+#   docker compose up -d --build     # build + start
+#   # → open https://localhost:${HTTPS_PORT:-8443}  (accept the self-signed cert)
+#   docker compose logs -f app       # follow app logs
+#   docker compose down              # stop (add -v to also drop the data volume)
+#
+# nginx terminates HTTPS with the self-signed key.pem/cert.pem in the project root.
+# For a VPS, replace those with a real cert (Let's Encrypt) or use a shared proxy.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vialvision-app
+    restart: unless-stopped
+    expose:
+      - "8000"                 # internal only; reached by nginx over the compose network
+    volumes:
+      - vialvision-data:/app/data   # persist SQLite DB + result images
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vialvision-nginx
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "${HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./nginx/vialvision.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./cert.pem:/etc/nginx/ssl/cert.pem:ro
+      - ./key.pem:/etc/nginx/ssl/key.pem:ro
+
+volumes:
+  vialvision-data:

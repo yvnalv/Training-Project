@@ -1,0 +1,36 @@
+# Keep the build context small — only app code, models, assets, requirements.
+.git/
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Training / experiment outputs (not needed at runtime)
+runs/
+training/
+data/
+test_images/
+docs/
+scripts/
+certs/
+
+# Notebooks / logs
+*.ipynb
+*.log
+
+# Root model weights NOT used by the app (the app loads models/)
+/best*.pt
+/best_old.pt
+/vialvision_2.pt
+/yolov8n.pt
+/yolo26*.pt
+
+# Editor / docs / misc
+*.md
+.vscode/
+.claude/
+run_https.bat
+generate_cert.py
