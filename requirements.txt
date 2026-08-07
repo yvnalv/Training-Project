@@ -1,5 +1,8 @@
 # Core ML
 ultralytics>=8.4,<9.0   # >=8.4 required to load/train YOLO26 models
+ncnn>=1.0               # Fast CPU inference runtime. When models/best_ncnn_model/ is
+                        # present, inference.py auto-selects it (~2-4x faster than the
+                        # .pt on CPU). See docs/STREAM_PERFORMANCE.md (Option A).
 
 # Web framework
 fastapi>=0.100,<1.0
