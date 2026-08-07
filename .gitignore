@@ -67,9 +67,13 @@ training/data.vialvision.yaml
 training/*.log
 runs/
 # Ignore the models dir EXCEPT the deployed weights (baked into the Docker image
-# by CI — kept in git so builds are reproducible). NCNN dir stays out (Pi-only).
+# by CI — kept in git so builds are reproducible). Both the PyTorch weights and the
+# NCNN export are tracked: inference.py auto-selects NCNN when present (faster CPU
+# inference — see docs/STREAM_PERFORMANCE.md).
 models/*
 !models/vialvision_yolo26.pt
+!models/best_ncnn_model/
+!models/best_ncnn_model/**
 test_images/*_annotated.jpg
 test_images/*_OLDMODEL.jpg
 test_images/*_RACKMODEL.jpg

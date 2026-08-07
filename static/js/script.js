@@ -54,6 +54,12 @@ function updateFpsDisplay(val) {
     document.getElementById('fpsValue').textContent = `${val} FPS`;
     if (state.isStreaming) {
         restartStreamInterval();
+        // Also cap the SERVER-side inference rate (server-camera mode, e.g. Pi 5),
+        // so this one slider governs both client and server streaming. See
+        // docs/STREAM_PERFORMANCE.md (Option B).
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ action: "set_fps", value: state.fps }));
+        }
     }
     saveSettings();
 }
@@ -328,6 +334,14 @@ let videoStream = null;
 let ws = null;
 let streamInterval = null; // FIX: declared at module scope (was implicit global)
 
+// Client-stream throttle (docs/STREAM_PERFORMANCE.md, Option B): keep at most one
+// frame "in flight" so a slow server can't build a latency backlog. The next frame
+// is only sent after the previous result arrives. Self-heals if a result is ever
+// dropped, after STALL_MS, so the stream can't permanently stall.
+let _frameInFlight = false;
+let _lastSendTs = 0;
+const STALL_MS = 4000;
+
 // FIX: declared at module scope so updateFpsDisplay() can safely call it
 // before streaming starts without throwing a ReferenceError.
 function restartStreamInterval() {
@@ -350,8 +364,9 @@ async function startCamera() {
         ws.onopen = () => {
             console.log("WS Connected");
 
-            // Send initial confidence so the session starts with the correct value
+            // Send initial confidence + FPS cap so the session starts correctly
             ws.send(JSON.stringify({ action: "set_conf", value: state.confidence }));
+            ws.send(JSON.stringify({ action: "set_fps", value: state.fps }));
 
             if (state.cameraMode === 'client') {
                 startClientStream(width, height);
@@ -370,6 +385,10 @@ async function startCamera() {
                 console.error("WS: failed to parse message:", err);
                 return;
             }
+
+            // A reply means the previous client frame has been processed — release
+            // the in-flight guard so the next tick can send a fresh frame.
+            _frameInFlight = false;
 
             if (data.error) {
                 if (state.cameraMode === 'server') {
@@ -473,6 +492,10 @@ function startStreamingCanvas(video, width, height) {
     _captureAndSend = () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
+        // Throttle: skip this tick if the previous frame is still being processed,
+        // unless it has stalled (result lost) longer than STALL_MS.
+        if (_frameInFlight && (performance.now() - _lastSendTs) < STALL_MS) return;
+
         ctx.save();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -482,7 +505,11 @@ function startStreamingCanvas(video, width, height) {
         ctx.restore();
 
         canvas.toBlob((blob) => {
-            if (ws && ws.readyState === WebSocket.OPEN) ws.send(blob);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(blob);
+                _frameInFlight = true;
+                _lastSendTs = performance.now();
+            }
         }, 'image/jpeg', 0.7);
     };
 
@@ -501,6 +528,7 @@ function stopCamera() {
 
     if (ws) { ws.close(); ws = null; }
     if (streamInterval) { clearInterval(streamInterval); streamInterval = null; }
+    _frameInFlight = false; // reset throttle guard for the next session
 
     state.isStreaming = false;
     _captureAndSend = () => {}; // reset so a stale interval can't fire

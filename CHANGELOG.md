@@ -5,6 +5,37 @@ Each entry includes the date, what changed, the problem it solved, and how it wa
 
 ---
 
+## [2026-08-07] Stream performance — commit NCNN model + throttle live stream
+**Branch:** `stream-perf-ncnn-throttling`
+
+**Problem:** live video-stream inference was slow on the production VPS (DigitalOcean
+$6/mo: 1 shared vCPU, 1 GB RAM, no GPU). Two causes: (1) the container ran the PyTorch
+`.pt` on CPU because the NCNN export was gitignored (Pi-only) and never shipped in the
+image; (2) every frame ran full inference with no rate limit, so a slow CPU built an
+ever-growing latency backlog — the displayed frame drifted seconds behind reality.
+
+**Fix (Option A — NCNN, ~2–4× faster CPU inference):** exported `vialvision_yolo26.pt`
+to NCNN as `models/best_ncnn_model/`, un-ignored it in `.gitignore` so it's baked into
+the Docker image (CI/CD, no manual VPS install), and added the `ncnn` runtime to
+`requirements.txt`. `inference.py` already auto-selects NCNN when present; loading is now
+explicit `task="detect"` to silence the export's task-guess warning.
+
+**Fix (Option B — throttle):** cap live-stream inference and drop frames arriving
+sooner, in both `/ws` branches (`app/api.py`) — always processing the most recent frame
+so latency stays bounded. The cap is **UI-tunable via the existing "Max FPS" slider**:
+changing it sends a new `set_fps` control message that sets the server-side per-session
+cap (`session_min_interval`), so it governs both client and server-camera modes — useful
+on hardware of unknown throughput (e.g. Raspberry Pi 5). `VIALVISION_STREAM_MAX_FPS`
+(default 10) is only the startup default. The frontend also keeps at most one client
+frame in flight (sends the next only after the previous result arrives; self-heals after
+4 s if a result is lost).
+
+**Files:** `models/best_ncnn_model/` (new, tracked), `.gitignore`, `requirements.txt`,
+`app/inference.py`, `app/api.py`, `static/js/script.js`, `docs/STREAM_PERFORMANCE.md`
+(new), `docs/README.md`. Option C (client-side inference) remains future work.
+
+---
+
 ## [2026-08-04] Rack detection fixed — YOLO26n retrained on rack-inclusive data
 **Branch:** `Refactor-Yolo26`
 

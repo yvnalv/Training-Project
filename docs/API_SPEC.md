@@ -184,6 +184,11 @@ results are **not** persisted to the database. Full protocol in
 ### Control
 - `{ "action": "set_conf", "value": 0.5 }` — sets the confidence threshold for all
   subsequent frames in this WebSocket session.
+- `{ "action": "set_fps", "value": 5 }` — caps the inference rate for this session
+  (frames/sec); frames arriving sooner are dropped to bound latency. Governs
+  server-camera mode and backstops client mode. `<=0` disables the cap. Defaults to
+  `VIALVISION_STREAM_MAX_FPS` (env, default 10) until the client sends a value. This
+  is the UI "Max FPS" slider — see [STREAM_PERFORMANCE.md](STREAM_PERFORMANCE.md).
 
 ---
 

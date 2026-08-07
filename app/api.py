@@ -4,8 +4,10 @@ import importlib
 import io
 import json
 import logging
+import os
 import socket
 import sys
+import time
 
 from PIL import Image as _PIL_Image
 
@@ -32,6 +34,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
+
+
+# Live-stream throttle (see docs/STREAM_PERFORMANCE.md, Option B). On a slow CPU,
+# processing every frame builds an ever-growing latency backlog. We cap inference to
+# a maximum rate and DROP frames that arrive sooner — always processing the most
+# recent one — so displayed latency stays bounded. Tune via VIALVISION_STREAM_MAX_FPS
+# (frames/sec); <=0 disables the cap.
+try:
+    _STREAM_MAX_FPS = float(os.getenv("VIALVISION_STREAM_MAX_FPS", "10"))
+except ValueError:
+    _STREAM_MAX_FPS = 10.0
+_STREAM_MIN_INTERVAL = 1.0 / _STREAM_MAX_FPS if _STREAM_MAX_FPS > 0 else 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +355,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     camera = Camera()
     session_conf: float = 0.4
+    last_infer: float = 0.0  # monotonic timestamp of the last processed frame
+    # Per-session inference-rate cap (see docs/STREAM_PERFORMANCE.md, Option B).
+    # Starts from the env default; the client's "Max FPS" slider overrides it live via
+    # a set_fps control message, so the rate is UI-tunable (no redeploy) — useful when
+    # the hardware's throughput is unknown (e.g. Raspberry Pi 5 server-camera mode).
+    session_min_interval: float = _STREAM_MIN_INTERVAL
 
     try:
         while True:
@@ -354,6 +374,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 # CLIENT MODE
                 # ---------------------------------------------------------
                 if "bytes" in data:
+                    # Throttle: drop frames arriving faster than the FPS cap so a
+                    # slow CPU can't build a latency backlog (see Option B docs).
+                    now = time.monotonic()
+                    if now - last_infer < session_min_interval:
+                        continue
+                    last_infer = now
+
                     image_bytes = data["bytes"]
                     detections, total_count, annotated_img_bytes = \
                         inference.run_inference_with_count(image_bytes, conf=session_conf)
@@ -403,6 +430,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         except (TypeError, ValueError):
                             logger.warning("Invalid conf value: %s", msg.get("value"))
 
+                    elif msg.get("action") == "set_fps":
+                        # UI "Max FPS" slider → per-session inference-rate cap. <=0
+                        # disables the cap. Governs server-camera mode and backstops
+                        # client mode. See docs/STREAM_PERFORMANCE.md (Option B).
+                        try:
+                            fps = float(msg.get("value", 0))
+                            session_min_interval = (1.0 / fps) if fps > 0 else 0.0
+                        except (TypeError, ValueError):
+                            logger.warning("Invalid fps value: %s", msg.get("value"))
+
             except asyncio.TimeoutError:
                 # ---------------------------------------------------------
                 # SERVER MODE
@@ -410,9 +447,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not camera.is_running:
                     continue
 
+                # Throttle: cap inference rate. get_frame() returns the latest frame,
+                # so skipping ticks just drops stale frames and keeps latency bounded.
+                now = time.monotonic()
+                if now - last_infer < session_min_interval:
+                    continue
+
                 frame = camera.get_frame()
                 if frame is None:
                     continue
+
+                last_infer = now
 
                 success, encoded_img = cv2.imencode(".jpg", frame)
                 if not success:

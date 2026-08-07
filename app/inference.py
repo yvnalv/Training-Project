@@ -44,8 +44,9 @@ def _resolve_model_path() -> str:
     )
 
 
-# Load the model once at import time.
-model = YOLO(_resolve_model_path())
+# Load the model once at import time. task="detect" is explicit so the NCNN export
+# (which has no embedded task metadata) doesn't emit a "guessing task" warning.
+model = YOLO(_resolve_model_path(), task="detect")
 
 
 # ---------------------------------------------------------------------------

@@ -57,12 +57,18 @@ Both modes return the same result shape and reuse
 - **Server → Browser:** same JSON shape as client mode, with `"mode": "server"`.
 - **On camera failure:** `{ "mode": "server", "error": "<message>" }`.
 
-### Control message (either mode)
+### Control messages (either mode)
 ```json
 { "action": "set_conf", "value": 0.5 }
+{ "action": "set_fps",  "value": 5 }
 ```
-Sets the confidence threshold for all subsequent frames in this session
-(`session_conf`). Invalid values are ignored with a warning.
+- `set_conf` — confidence threshold for all subsequent frames (`session_conf`).
+- `set_fps` — inference-rate cap for this session (`session_min_interval`); frames
+  arriving sooner are dropped to bound latency. Governs server-camera mode and
+  backstops client mode. `<=0` disables. Defaults to `VIALVISION_STREAM_MAX_FPS`
+  (env, default 10) until the client sends the UI "Max FPS" slider value.
+
+Invalid values are ignored with a warning.
 
 ## Server loop mechanics
 
@@ -71,7 +77,7 @@ timeout=0.05)`:
 
 - **Binary received** → client-mode inference, send result.
 - **Text received** → control message (`start_server_stream` / `stop_server_stream`
-  / `set_conf`).
+  / `set_conf` / `set_fps`).
 - **Timeout (no message in 50 ms)** → if a server camera is running, grab a frame,
   encode (`cv2.imencode(".jpg", ...)`), run inference, send result; then
   `await asyncio.sleep(0.05)`.

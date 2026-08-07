@@ -189,3 +189,4 @@ the subdomain via `certbot --standalone` with nginx stop/start hooks.
 | Var | Default | Purpose |
 |---|---|---|
 | `VIALVISION_TAG` | `latest` | Image tag to run (set by the deploy workflow) |
+| `VIALVISION_STREAM_MAX_FPS` | `10` | Live-stream inference rate cap; frames arriving sooner are dropped to bound latency. Lower to `4`–`6` on a slow CPU; `<=0` disables. See [STREAM_PERFORMANCE.md](STREAM_PERFORMANCE.md). |

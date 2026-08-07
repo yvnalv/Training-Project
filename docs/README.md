@@ -55,6 +55,7 @@ VialVision domain:
 | [HARDWARE.md](HARDWARE.md) | Hardware recommendation (Pi 5 / Hailo / Jetson) with benchmarks |
 | [CAMERA.md](CAMERA.md) | Camera abstraction and color/flip pipeline |
 | [STREAMING.md](STREAMING.md) | WebSocket protocol and message contracts |
+| [STREAM_PERFORMANCE.md](STREAM_PERFORMANCE.md) | Why the video stream is slow + optimization options A/B/C (NCNN, throttling, client-side) |
 
 ### Interfaces & data
 | Doc | Description |
