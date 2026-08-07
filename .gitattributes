@@ -1,0 +1,8 @@
+# Treat model artifacts as binary so no platform mangles their line endings.
+# The NCNN export's .param is whitespace-sensitive text and the .bin/.pt are binary;
+# marking the whole model dir + weight extensions binary prevents LF<->CRLF conversion
+# on Windows checkouts (CI/VPS/Pi are Linux, but this keeps every machine consistent).
+models/best_ncnn_model/** binary
+*.pt binary
+*.bin binary
+*.param binary
