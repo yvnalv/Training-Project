@@ -257,3 +257,33 @@ See [TESTING.md](TESTING.md) for where an automated harness would live.
 
 _Benchmark figures above are Ultralytics' official COCO / Raspberry Pi 5 numbers and
 are indicative; validate on our own eval set and hardware before deciding._
+
+---
+
+## Real-world domain shift (deployed model fails on uncontrolled photos) — 2026-08-08
+
+**Symptom:** after deployment, the model failed on a casual phone photo (dim room, blue
+keyboard-RGB colour cast, unfamiliar white stand) — it found only 1–3 *clustered* boxes,
+not 9, and mislabelled colours.
+
+**Root cause: domain shift — not a saturation-only issue.** The model was trained on a
+narrow, specific rig (bright, even light; foam background). Changing lighting + white
+balance + background + camera all at once makes **both localisation and classification**
+break. The model generalises only to conditions close to its training data.
+
+**Two deployment targets, two answers:**
+- **Controlled appliance (Pi + fixed jig) — primary, reliable:** control the environment
+  with a **light box / diffuser** (kills colour casts), a fixed background + distance, and
+  **retrain on data captured through that exact rig** so *training conditions == deployment
+  conditions*. (**Track 3** — environment/dataset owned by the user.)
+- **Wild phones (web/VPS) — much harder:** needs a **large, diverse dataset** (many
+  lightings, backgrounds, phones — including messy ones) to generalise. A big data effort;
+  set expectations that it works best in decent light until that exists.
+
+**Tension to navigate:** we deliberately avoided hue/saturation augmentation to keep
+yellow-vs-purple crisp — which is exactly what makes the model brittle to colour casts. For
+the wild case, carefully reintroduce some white-balance/colour robustness (or normalise WB
+in preprocessing) **without** destroying the colour discrimination.
+
+> Note: **NCNN vs PyTorch is unrelated** to this — the backend only affects *speed*, not
+> detection quality. See [STREAM_PERFORMANCE.md](STREAM_PERFORMANCE.md).

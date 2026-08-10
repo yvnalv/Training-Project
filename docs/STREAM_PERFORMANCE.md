@@ -153,3 +153,34 @@ and porting the decode/dedup logic.
    streaming is required, either move to a **2 vCPU** droplet or pursue **C**.
 3. **C** is the proper answer for scale, but it's a genuine rewrite — schedule it
    only if per-device/real-time streaming becomes a hard requirement.
+
+---
+
+## Two inference modes (Live vs Aim & Capture) — implemented 2026-08-08
+
+Live per-frame inference is CPU-bound and never smooth on the VPS (1 vCPU). Rather than
+fight that, **Settings → Inference Mode** offers two modes (persisted per device):
+
+| Mode | Preview | Reading | Best for |
+|---|---|---|---|
+| **Live** | annotated every frame | continuous | Pi (NCNN + multiple cores) |
+| **Aim & Capture** | raw camera, **no inference** (smooth) | one **full-resolution** reading on the "Capture & Analyze" button | VPS, and any accurate read |
+
+Aim & Capture wins twice: the preview is smooth (zero inference cost), and the reading is
+the **most accurate** (full resolution — the live path downscales 50 %).
+
+**Implementation:**
+- Setting `inferenceMode` = `live` | `snapshot`, persisted. Default `live` on the Pi,
+  `snapshot` elsewhere (`api._platform_info()` → `default_inference_mode`).
+- **Client camera:** preview is the local `<video>` (no server round-trip); Capture →
+  `POST /predict` with `full=true`.
+- **Server (Pi) camera:** `start_server_stream {preview:true}` streams raw frames (no
+  inference); `capture_now` runs one full-res reading. See `app/api.py`.
+- Full-res path: `run_inference_with_count(scale_factor=1.0)`; the live path stays at 0.5.
+
+## NCNN status indicator
+
+Settings shows an **Inference Backend** badge — **"NCNN (fast)"** or **"PyTorch (slower)"**
+— from `_platform_info().model_backend` (set in `inference._resolve_model_path()`). If a
+deployment shows **PyTorch**, the `ncnn` runtime isn't installed there and it fell back to
+the slow path; fix by ensuring `ncnn` is in the environment.

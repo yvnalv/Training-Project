@@ -9,7 +9,8 @@ let state = {
     flipHorizontal: false,
     confidence: 0.25,
     isStreaming: false,
-    cameraMode: 'client' // 'client' | 'server'  — overridden by loadSettings()
+    cameraMode: 'client', // 'client' | 'server'  — overridden by loadSettings()
+    inferenceMode: 'live' // 'live' | 'snapshot' (Aim & Capture) — overridden by loadSettings()
 };
 
 
@@ -118,6 +119,15 @@ document.getElementById('cameraSourceSelect').addEventListener('change', (e) => 
     if (state.isStreaming) {
         stopCamera();
         alert("Camera source changed. Please click Start to resume.");
+    }
+});
+
+document.getElementById('inferenceModeSelect').addEventListener('change', (e) => {
+    state.inferenceMode = e.target.value;
+    saveSettings();
+    if (state.isStreaming) {
+        stopCamera();
+        alert("Inference mode changed. Please click Start to resume.");
     }
 });
 
@@ -355,6 +365,20 @@ function restartStreamInterval() {
 let _captureAndSend = () => {};
 
 async function startCamera() {
+    const snapshot = state.inferenceMode === 'snapshot';
+    _setCaptureBtn(snapshot);
+    _captureShown = false;
+
+    // Client camera + Aim & Capture: local preview only — no WebSocket, no per-frame
+    // inference. The single reading runs on "Capture & Analyze" via /predict?full.
+    if (snapshot && state.cameraMode === 'client') {
+        state.isStreaming = true;
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        await _startClientPreview();
+        return;
+    }
+
     try {
         const [width, height] = state.resolution.split('x').map(Number);
 
@@ -371,7 +395,7 @@ async function startCamera() {
             if (state.cameraMode === 'client') {
                 startClientStream(width, height);
             } else {
-                startServerStream(width, height);
+                startServerStream(width, height, snapshot);  // snapshot => preview frames
             }
         };
 
@@ -403,6 +427,20 @@ async function startCamera() {
 
                 alert(`Camera error: ${data.error}`);
                 stopCamera();
+                return;
+            }
+
+            // Aim & Capture (server): raw preview frames carry no results. Show them,
+            // but don't overwrite a freshly captured reading (kept on screen briefly).
+            if (data.preview) {
+                if (!_captureShown) {
+                    document.getElementById('streamResult').src = 'data:image/jpeg;base64,' + data.image;
+                }
+                return;
+            }
+            // Aim & Capture (server): a full-res reading — freeze it on screen.
+            if (data.capture) {
+                _showCaptureResult(data);
                 return;
             }
 
@@ -469,9 +507,13 @@ async function startClientStream(width, height) {
     }
 }
 
-function startServerStream() {
+function startServerStream(width, height, preview = false) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: "start_server_stream", resolution: state.resolution }));
+        ws.send(JSON.stringify({
+            action: "start_server_stream",
+            resolution: state.resolution,
+            preview: !!preview,   // true = raw preview frames (Aim & Capture)
+        }));
     }
 }
 
@@ -532,8 +574,124 @@ function stopCamera() {
 
     state.isStreaming = false;
     _captureAndSend = () => {}; // reset so a stale interval can't fire
+
+    // Aim & Capture cleanup
+    _captureShown = false;
+    clearTimeout(_captureResumeTimer);
+    const _v = document.getElementById('videoElement');
+    if (_v) { _v.style.display = 'none'; _v.srcObject = null; }
+    _setCaptureBtn(false);
+    document.getElementById('streamResult').style.display = 'block';
+
     document.getElementById('startBtn').disabled = false;
     document.getElementById('stopBtn').disabled = true;
+}
+
+
+// ---------------------------------------------------------------------------
+// Aim & Capture (snapshot) mode helpers
+// ---------------------------------------------------------------------------
+
+let _captureShown = false;          // a captured reading is currently frozen on screen
+let _captureResumeTimer = null;
+
+function _setCaptureBtn(show) {
+    const btn = document.getElementById('captureAnalyzeBtn');
+    if (btn) btn.style.display = show ? '' : 'none';
+}
+
+// Client camera preview: show the local <video> live (no server round-trip, so smooth).
+async function _startClientPreview() {
+    try {
+        const [width, height] = state.resolution.split('x').map(Number);
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width, height, facingMode: { ideal: "environment" } }
+        });
+        videoStream = stream;
+        const video = document.getElementById('videoElement');
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        video.play();
+        video.style.display = 'block';
+        document.getElementById('streamResult').style.display = 'none';
+    } catch (err) {
+        console.error("client preview error:", err);
+        alert("Could not access camera: " + err.message);
+        stopCamera();
+    }
+}
+
+// "Capture & Analyze" — one FULL-resolution reading (most accurate).
+async function captureAnalyze() {
+    const btn = document.getElementById('captureAnalyzeBtn');
+
+    // Server camera (Pi): ask the server to read the current frame at full res.
+    if (state.cameraMode === 'server') {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            if (btn) btn.disabled = true;
+            ws.send(JSON.stringify({ action: "capture_now" }));
+            setTimeout(() => { if (btn) btn.disabled = false; }, 2000);
+        }
+        return;
+    }
+
+    // Client camera: grab the current video frame → POST full-res to /predict.
+    const video = document.getElementById('videoElement');
+    if (!video || !video.videoWidth) return;
+    const w = video.videoWidth, h = video.videoHeight;
+    const canvas = document.getElementById('canvasElement');
+    const ctx = canvas.getContext('2d');
+    if (state.rotation === 90 || state.rotation === 270) { canvas.width = h; canvas.height = w; }
+    else { canvas.width = w; canvas.height = h; }
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(state.rotation * Math.PI / 180);
+    if (state.flipHorizontal) ctx.scale(-1, 1);
+    ctx.drawImage(video, -w / 2, -h / 2, w, h);
+    ctx.restore();
+
+    if (btn) btn.disabled = true;
+    canvas.toBlob(async (blob) => {
+        try {
+            const fd = new FormData();
+            fd.append('file', blob, 'capture.jpg');
+            fd.append('conf', state.confidence);
+            fd.append('full', 'true');   // full-resolution reading
+            const res = await fetch('/predict', { method: 'POST', body: fd });
+            if (!res.ok) throw new Error('Server error: ' + res.status);
+            _showCaptureResult(await res.json());
+        } catch (e) {
+            alert("Capture failed: " + e.message);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }, 'image/jpeg', 0.92);
+}
+
+// Freeze a captured reading on screen, then auto-resume the live preview.
+function _showCaptureResult(data) {
+    _captureShown = true;
+    const img = document.getElementById('streamResult');
+    img.src = 'data:image/jpeg;base64,' + data.image;
+    img.style.display = 'block';
+    const video = document.getElementById('videoElement');
+    if (video) video.style.display = 'none';
+    updateTable(data.detections || [], 'streamTableBody');
+    updateMpnDisplay(data, 'streamMpnPattern', 'streamMpnValue', 'streamMpnCI', 'streamMpnRisk', 'streamMpnRiskItem');
+    clearTimeout(_captureResumeTimer);
+    _captureResumeTimer = setTimeout(_resumePreview, 5000);
+}
+
+function _resumePreview() {
+    _captureShown = false;
+    if (!state.isStreaming) return;
+    if (state.cameraMode === 'client') {
+        const video = document.getElementById('videoElement');
+        if (video) video.style.display = 'block';
+        document.getElementById('streamResult').style.display = 'none';
+    }
+    // Server mode resumes automatically — the next preview frame paints (flag cleared).
 }
 
 
@@ -1129,6 +1287,7 @@ function saveSettings() {
                     resolution:     state.resolution,
                     confidence:     state.confidence,
                     flipHorizontal: state.flipHorizontal,
+                    inferenceMode:  state.inferenceMode,
                 }),
             });
         } catch (e) {
@@ -1179,6 +1338,21 @@ async function loadSettings() {
             state.flipHorizontal = flip;
             const flipEl = document.getElementById('flipHorizontal');
             if (flipEl) flipEl.checked = flip;
+        }
+
+        // inferenceMode: prefer saved value, fall back to platform default
+        const im = saved.inferenceMode || data.default_inference_mode || 'live';
+        state.inferenceMode = im;
+        const imSel = document.getElementById('inferenceModeSelect');
+        if (imSel) imSel.value = im;
+
+        // inference backend badge (NCNN fast path vs PyTorch fallback)
+        const beEl = document.getElementById('modelBackend');
+        if (beEl) {
+            const be = data.model_backend || 'unknown';
+            if (be === 'ncnn')        { beEl.textContent = 'NCNN (fast)';      beEl.className = 'backend-badge ok'; }
+            else if (be === 'pytorch'){ beEl.textContent = 'PyTorch (slower)'; beEl.className = 'backend-badge warn'; }
+            else                      { beEl.textContent = be;                 beEl.className = 'backend-badge'; }
         }
 
         // network IP
