@@ -287,3 +287,81 @@ in preprocessing) **without** destroying the colour discrimination.
 
 > Note: **NCNN vs PyTorch is unrelated** to this — the backend only affects *speed*, not
 > detection quality. See [STREAM_PERFORMANCE.md](STREAM_PERFORMANCE.md).
+
+---
+
+## Lens distortion + edge tubes blending into the white rig — 2026-08-11
+
+**Symptom:** on a phone capture of a full 9-tube rack, the model detected only **7 tubes**
+— the **leftmost and rightmost** tubes were missed. In person there is a clear gap between
+each tube and the rig wall; on camera the two end tubes appeared merged with the white rig.
+
+**Root cause — three effects that all peak at the frame edges:**
+1. **Barrel / "fisheye" lens distortion.** Phone cameras (especially the wide / ultra-wide
+   lens, held close) bend the image radially — **near-zero distortion in the centre, worst
+   at the left/right edges.** The two end tubes are exactly where the warp is strongest.
+2. **Off-axis / angled view.** The camera is not perpendicular, so the end tubes are
+   **foreshortened** and partly occluded by the rig walls.
+3. **Low contrast (clear tube on white rig).** A pale, semi-transparent tube against a
+   **white** rig has almost no edge signal — and once (1) and (2) flatten and compress it,
+   the detector has nothing left to latch onto. The training images had a darker background,
+   so this white-on-clear case is a worst case for contrast.
+
+They **stack at the edges**, which is why the *centre* seven tubes are found and the *two
+ends* are lost.
+
+**Fixes, by leverage (and by which deployment target — see the two use cases below):**
+
+| Fix | What it does | Best for |
+|---|---|---|
+| **Perpendicular + centred + backed-off camera** (fixed jig) | Puts all 9 tubes in the low-distortion centre zone; removes foreshortening | Pi appliance |
+| **Dark, matte, contrasting backdrop** behind the tubes | End tubes stop blending into white — cheap, high impact | Pi appliance |
+| **Even lighting** (light box / diffuser) | End tubes aren't washed out or shadowed | Pi appliance |
+| **Lens undistortion** (OpenCV calibration → `undistort`) | Straightens barrel distortion before inference; per-camera calibration | Phones / wide lenses |
+| **Retrain on rig data incl. edge tubes** | Model learns this exact geometry + contrast | Both |
+| **Fixed-ROI classification** (know the 9 positions → crop → classify) | Makes "can't *detect* an edge tube" structurally impossible | Pi appliance |
+
+**Structural fix — fixed-ROI.** This is the third time real-world variance (dim room,
+colour cast, now edge-blend) has broken *detection*. When the rack sits in a repeatable
+jig, we already know where all 9 tubes are, so we **crop the 9 known positions and classify
+each** instead of asking the detector to *find* them. An edge tube that blends into white is
+impossible to *detect* but trivial to *classify*. See
+[FIXED_ROI_DESIGN.md](FIXED_ROI_DESIGN.md).
+
+---
+
+## The two deployment use cases (they are genuinely different products)
+
+VialVision ships to **two targets with different physics** — the accuracy strategy must
+branch on which one you are building for. Do not expect one model/config to serve both
+equally.
+
+### 1. Controlled appliance — Raspberry Pi 5 + fixed jig (primary, reliable)
+
+- **Environment is controlled by us:** fixed camera mount (perpendicular, centred, backed
+  off), fixed rack position, controlled lighting (light box / diffuser), dark contrasting
+  backdrop, locked focus / exposure / white balance.
+- **Because the rack is in a repeatable position, we can use [fixed-ROI](FIXED_ROI_DESIGN.md)**
+  — crop the 9 known tube positions and classify each. This removes the whole "missing edge
+  tube" class of failures and is the recommended path for a dependable product.
+- **Retrain on data captured *through this exact rig*** so training conditions ==
+  deployment conditions.
+- **Target:** high, repeatable accuracy. This is the one to guarantee.
+
+### 2. Wild phones — web app on the VPS (best-effort)
+
+- **Environment is uncontrolled:** any phone, any lens (incl. ultra-wide barrel
+  distortion), any lighting, any background, handheld angle. The 7/9 edge-blend failure
+  above is this case.
+- **No fixed jig → no fixed-ROI.** Detection must genuinely *find* the tubes, so this path
+  depends on a **large, diverse dataset** (many phones / lightings / backgrounds, including
+  messy ones) plus optional **per-phone lens undistortion** and **white-balance
+  normalisation** in preprocessing.
+- **Target:** best-effort. Set client expectations: reliable in decent light and a roughly
+  straight-on framing; degrades with extreme wide-angle, glare, or clutter.
+
+> **Design consequence:** the app already exposes an **inference mode** (Live vs Aim &
+> Capture) and a **model backend** badge. The jig path will additionally gain a **fixed-ROI
+> mode** (calibrate once, then classify fixed crops); the phone path stays on full-frame
+> detection. See [FIXED_ROI_DESIGN.md](FIXED_ROI_DESIGN.md) and
+> [STREAM_PERFORMANCE.md](STREAM_PERFORMANCE.md).

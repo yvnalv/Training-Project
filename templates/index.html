@@ -469,6 +469,30 @@
           </div>
         </div>
 
+        <!-- Fixed-ROI (Jig mode) -->
+        <div class="settings-group" id="roiGroup">
+          <h3><i class="fa-solid fa-table-cells"></i> Fixed-ROI (Jig Mode)</h3>
+          <div class="setting-item checkbox">
+            <label>
+              <input type="checkbox" id="roiModeToggle" onchange="onRoiModeToggle(this.checked)">
+              Classify 9 fixed positions instead of detecting tubes
+            </label>
+            <small>For the fixed camera jig only. Removes missed edge-tubes — the reading
+              always yields 9 tubes. Calibrate once; recalibrate if the camera/rack moves.</small>
+          </div>
+          <div class="setting-item">
+            <label>Calibration</label>
+            <span id="roiStatus" class="backend-badge warn">Not calibrated</span>
+            <div class="btn-group" style="margin-top:0.5rem;">
+              <button class="btn sm" onclick="openCalibration()">
+                <i class="fa-solid fa-crosshairs"></i> Calibrate positions
+              </button>
+            </div>
+            <small>Snaps a reference frame, auto-detects the 9 tube boxes, then lets you drag
+              to fine-tune before saving.</small>
+          </div>
+        </div>
+
         <!-- Network -->
         <div class="settings-group">
           <h3><i class="fa-solid fa-network-wired"></i> Network</h3>
@@ -482,6 +506,43 @@
     </section>
 
   </main>
+</div>
+
+<!-- ── ROI Calibration Modal ─────────────────────────── -->
+<div id="calibrateModal" class="modal-overlay">
+  <div class="modal-box calib-box" role="dialog" aria-modal="true" aria-labelledby="calibTitle">
+    <div class="modal-header">
+      <div class="modal-header-left">
+        <span class="modal-pattern" id="calibTitle">Calibrate tube positions</span>
+        <span class="backend-badge" id="calibCount">0 / 9</span>
+      </div>
+      <button class="modal-close" onclick="closeCalibration()" aria-label="Close">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="calib-body">
+      <p class="calib-hint" id="calibHint">
+        Place the rack in the jig, then <b>Auto-detect</b>. Drag a box to move it, drag its
+        corner to resize. Add or remove boxes until you have exactly <b>9</b>, ordered
+        left→right, then Save.
+      </p>
+      <div class="calib-stage" id="calibStage">
+        <img id="calibImage" alt="reference frame" />
+        <!-- ROI boxes injected here -->
+      </div>
+    </div>
+
+    <div class="modal-footer calib-footer">
+      <button class="btn sm" onclick="recapculateCalibration()"><i class="fa-solid fa-camera"></i> New frame</button>
+      <button class="btn sm" onclick="autoDetectRois()"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto-detect</button>
+      <button class="btn sm" onclick="addRoiBox()"><i class="fa-solid fa-plus"></i> Add box</button>
+      <button class="btn sm danger" onclick="removeSelectedRoi()"><i class="fa-solid fa-trash"></i> Remove selected</button>
+      <span style="flex:1"></span>
+      <button class="btn sm" onclick="closeCalibration()">Cancel</button>
+      <button class="btn sm primary" id="calibSaveBtn" onclick="saveCalibration()" disabled>Save positions</button>
+    </div>
+  </div>
 </div>
 
 <!-- ── History Detail Modal ──────────────────────────── -->

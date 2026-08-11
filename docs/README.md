@@ -51,7 +51,8 @@ VialVision domain:
 | [INFERENCE_PIPELINE.md](INFERENCE_PIPELINE.md) | Detect → dedup → annotate → compute |
 | [MODEL_AND_DATA.md](MODEL_AND_DATA.md) | Model weights, training data, assets |
 | [LABELING_STRATEGY.md](LABELING_STRATEGY.md) | Label schema + Roboflow preprocessing/augmentation policy for YOLO26 retraining |
-| [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) | Prioritized plan to improve accuracy + YOLO26 upgrade evaluation |
+| [ACCURACY_IMPROVEMENT.md](ACCURACY_IMPROVEMENT.md) | Prioritized plan to improve accuracy + YOLO26 upgrade evaluation + the two deployment use cases |
+| [FIXED_ROI_DESIGN.md](FIXED_ROI_DESIGN.md) | Jig-mode fixed-ROI classification (crop 9 known tube positions instead of detecting them) |
 | [HARDWARE.md](HARDWARE.md) | Hardware recommendation (Pi 5 / Hailo / Jetson) with benchmarks |
 | [CAMERA.md](CAMERA.md) | Camera abstraction and color/flip pipeline |
 | [STREAMING.md](STREAMING.md) | WebSocket protocol and message contracts |
