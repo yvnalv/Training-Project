@@ -88,6 +88,18 @@ def _active_rois():
     return boxes
 
 
+def _lens_k1() -> float:
+    """
+    Saved lens-distortion-correction coefficient (option C1). 0.0 = off. Applied
+    server-side before inference to straighten phone barrel/"fisheye" distortion.
+    See docs/ACCURACY_IMPROVEMENT.md and inference._undistort.
+    """
+    try:
+        return float(get_all_settings().get("lensK1", 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
 def _compute_mpn(detections: list, total_count: int) -> dict:
     """
     Return MPN fields for a given detection list.
@@ -143,14 +155,15 @@ async def predict(
 
     # Fixed-ROI (jig) mode takes precedence when calibrated: classify the 9 known tube
     # positions instead of detecting them (always full-res crops). See FIXED_ROI_DESIGN.md.
+    k1 = _lens_k1()
     rois = _active_rois()
     if rois:
         detections, total_count, annotated_img_bytes = inference.run_inference_fixed_roi(
-            image_bytes, rois, conf=conf
+            image_bytes, rois, conf=conf, k1=k1
         )
     else:
         detections, total_count, annotated_img_bytes = inference.run_inference_with_count(
-            image_bytes, conf=conf, scale_factor=(1.0 if full else 0.5)
+            image_bytes, conf=conf, scale_factor=(1.0 if full else 0.5), k1=k1
         )
 
     if total_count != 9:
@@ -364,7 +377,9 @@ async def put_settings_endpoint(request: Request):
     ALLOWED_KEYS = {"cameraMode", "fps", "resolution", "confidence", "flipHorizontal",
                     "inferenceMode",
                     # Fixed-ROI (jig) mode — see docs/FIXED_ROI_DESIGN.md
-                    "roiMode", "roiBoxes", "roiCalibratedAt"}
+                    "roiMode", "roiBoxes", "roiCalibratedAt",
+                    # Lens distortion correction (option C1) — see docs/ACCURACY_IMPROVEMENT.md
+                    "lensK1"}
     try:
         body = await request.json()
     except Exception:
@@ -537,14 +552,15 @@ async def websocket_endpoint(websocket: WebSocket):
                             if frame is not None:
                                 ok, enc = cv2.imencode(".jpg", frame)
                                 if ok:
+                                    k1 = _lens_k1()
                                     rois = _active_rois()
                                     if rois:
                                         dets, cnt, ann = inference.run_inference_fixed_roi(
-                                            enc.tobytes(), rois, conf=session_conf
+                                            enc.tobytes(), rois, conf=session_conf, k1=k1
                                         )
                                     else:
                                         dets, cnt, ann = inference.run_inference_with_count(
-                                            enc.tobytes(), conf=session_conf, scale_factor=1.0
+                                            enc.tobytes(), conf=session_conf, scale_factor=1.0, k1=k1
                                         )
                                     await websocket.send_json({
                                         "mode": "server",

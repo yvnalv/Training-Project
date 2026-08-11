@@ -12,7 +12,8 @@ let state = {
     cameraMode: 'client', // 'client' | 'server'  — overridden by loadSettings()
     inferenceMode: 'live', // 'live' | 'snapshot' (Aim & Capture) — overridden by loadSettings()
     roiMode: false,       // fixed-ROI (jig) mode on/off — overridden by loadSettings()
-    roiBoxes: null        // saved 9 normalized [x1,y1,x2,y2] boxes, or null — see FIXED_ROI_DESIGN.md
+    roiBoxes: null,       // saved 9 normalized [x1,y1,x2,y2] boxes, or null — see FIXED_ROI_DESIGN.md
+    lensK1: 0             // lens-distortion correction coefficient (option C1); 0 = off
 };
 
 
@@ -76,6 +77,12 @@ function updateConfDisplay(val) {
     if (state.isStreaming && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action: "set_conf", value: state.confidence }));
     }
+    saveSettings();
+}
+
+function updateLensK1Display(val) {
+    state.lensK1 = parseFloat(val);
+    document.getElementById('lensK1Value').textContent = Number(val).toFixed(2);
     saveSettings();
 }
 
@@ -1301,6 +1308,7 @@ function saveSettings() {
                     confidence:     state.confidence,
                     flipHorizontal: state.flipHorizontal,
                     inferenceMode:  state.inferenceMode,
+                    lensK1:         state.lensK1,
                 }),
             });
         } catch (e) {
@@ -1351,6 +1359,18 @@ async function loadSettings() {
             state.flipHorizontal = flip;
             const flipEl = document.getElementById('flipHorizontal');
             if (flipEl) flipEl.checked = flip;
+        }
+
+        // lens correction (option C1)
+        if (saved.lensK1 !== undefined) {
+            const k1 = parseFloat(saved.lensK1);
+            if (!Number.isNaN(k1)) {
+                state.lensK1 = k1;
+                const lkEl = document.getElementById('lensK1Range');
+                if (lkEl) { lkEl.value = k1; }
+                const lkVal = document.getElementById('lensK1Value');
+                if (lkVal) { lkVal.textContent = k1.toFixed(2); }
+            }
         }
 
         // inferenceMode: prefer saved value, fall back to platform default

@@ -366,8 +366,19 @@ draws an **on-screen alignment guide** — a 9-slot rack outline plus a plain-la
 (*"use the 1× lens, hold straight-on, fill the frame"*). Lining the rack up inside the guide
 keeps all 9 tubes in the centre low-distortion zone and reduces the edge-blend that made the
 end tubes disappear. It's a framing aid only (detection still runs full-frame); it does not
-undistort the lens — that's the next step ("option C": OpenCV camera-calibration `undistort`
-in preprocessing). The durable fix remains a diverse phone dataset.
+undistort the lens — that's **option C1** below. The durable fix remains a diverse phone
+dataset.
+
+**Lens correction (implemented — "option C1"):** a single **calibration-free** knob. A proper
+fix needs a per-phone checkerboard calibration (impractical for a common user), so instead we
+assume the principal point is the image centre and focal length ~ image width, and expose one
+radial coefficient `lensK1` as a Settings slider (*Camera Correction → Lens Correction*). It's
+applied **server-side before inference** (`inference._undistort`, `cv2.undistort` with
+`getOptimalNewCameraMatrix`), so the model sees a straightened frame and the captured result
+shows it too — the operator just nudges the slider up until the rack edges look straight. 0 =
+off (leave at 0 for the low-distortion Pi camera). Scope: applied to the capture/reading path
+(the same paths as fixed-ROI); it's approximate, not a substitute for real calibration or a
+diverse dataset, but it costs the user one slider and no props.
 
 > **Design consequence:** the app already exposes an **inference mode** (Live vs Aim &
 > Capture) and a **model backend** badge. The jig path will additionally gain a **fixed-ROI

@@ -2,6 +2,8 @@ import io
 import logging
 from pathlib import Path
 
+import cv2
+import numpy as np
 from ultralytics import YOLO
 from PIL import Image, ImageDraw, ImageFont
 
@@ -171,6 +173,33 @@ def tubes_to_xyz(tubes):
 
 
 # ---------------------------------------------------------------------------
+# Lens distortion correction (option C1 — calibration-free)
+# ---------------------------------------------------------------------------
+
+def _undistort(image, k1: float):
+    """
+    Approximate, calibration-free barrel/"fisheye" correction for phone cameras.
+
+    A proper fix needs a per-phone checkerboard calibration; that's impractical for a
+    common user. Instead we assume the principal point is the image centre and the focal
+    length ~ the image width, and expose a single radial coefficient `k1` the user nudges
+    (a Settings slider) until the rack edges look straight in the captured result. 0 = off.
+    getOptimalNewCameraMatrix(alpha=1) keeps the whole frame (edges may gain a small black
+    border, but the tubes move inward, off the distorted edge). See docs/ACCURACY_IMPROVEMENT.md.
+    """
+    if not k1 or abs(k1) < 1e-6:
+        return image
+    arr = np.asarray(image)
+    h, w = arr.shape[:2]
+    f = float(w)
+    K = np.array([[f, 0, w / 2.0], [0, f, h / 2.0], [0, 0, 1]], dtype=np.float64)
+    dist = np.array([float(k1), 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    new_k, _ = cv2.getOptimalNewCameraMatrix(K, dist, (w, h), 1, (w, h))
+    undist = cv2.undistort(arr, K, dist, None, new_k)
+    return Image.fromarray(undist)
+
+
+# ---------------------------------------------------------------------------
 # Shared annotation
 # ---------------------------------------------------------------------------
 
@@ -269,7 +298,7 @@ def _draw_annotations(image, detections, total_count):
 # ---------------------------------------------------------------------------
 
 def run_inference_with_count(image_bytes: bytes, conf: float = 0.4,
-                             scale_factor: float = 0.5):
+                             scale_factor: float = 0.5, k1: float = 0.0):
     """
     Full inference pipeline: load image -> downscale -> YOLO -> deduplicate ->
     annotate -> return results.
@@ -289,8 +318,9 @@ def run_inference_with_count(image_bytes: bytes, conf: float = 0.4,
     conf = max(0.05, min(0.95, conf))
     scale_factor = max(0.1, min(1.0, scale_factor))
 
-    # ---- Load & (optionally) downscale image ----
+    # ---- Load, (optionally) undistort, then (optionally) downscale image ----
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image = _undistort(image, k1)
     if scale_factor < 1.0:
         new_w = int(image.width * scale_factor)
         new_h = int(image.height * scale_factor)
@@ -386,7 +416,7 @@ def _classify_crop(crop, conf: float):
     return result.names[int(best.cls)], float(best.conf)
 
 
-def run_inference_fixed_roi(image_bytes: bytes, rois, conf: float = 0.4):
+def run_inference_fixed_roi(image_bytes: bytes, rois, conf: float = 0.4, k1: float = 0.0):
     """
     Fixed-ROI pipeline (jig mode): instead of *detecting* tubes, crop the N known ROI
     positions and *classify* each. Always returns len(rois) results, so on a 9-ROI jig
@@ -405,6 +435,7 @@ def run_inference_fixed_roi(image_bytes: bytes, rois, conf: float = 0.4):
     """
     conf = max(0.05, min(0.95, conf))
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image = _undistort(image, k1)
     W, H = image.width, image.height
 
     detections = []

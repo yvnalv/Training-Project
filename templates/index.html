@@ -473,6 +473,14 @@
               Flip Horizontal (Mirror)
             </label>
           </div>
+          <div class="setting-item">
+            <label>Lens Correction — <span id="lensK1Value">0.00</span></label>
+            <input type="range" id="lensK1Range" min="-0.5" max="0.5" step="0.02" value="0"
+                   oninput="updateLensK1Display(this.value)">
+            <small>Straightens phone wide-angle "fisheye" barrel distortion. 0 = off.
+              Nudge up until the rack edges look straight in the captured result. Leave at 0
+              for the Pi camera.</small>
+          </div>
         </div>
 
         <!-- Model -->
