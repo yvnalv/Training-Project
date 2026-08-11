@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
+# Static-asset cache-buster. Stamped onto style.css / script.js URLs in index.html as
+# ?v=<this>. It's the process start time, so it changes on every container restart (i.e.
+# every deploy recreates the container) — the browser then fetches fresh JS/CSS instead of
+# serving stale cached copies. Stable within a single container's life, so normal caching
+# still works between deploys. Replaces the old hand-bumped ?v=N (which was easy to forget).
+_ASSET_VERSION = str(int(time.time()))
+
 
 # Live-stream throttle (see docs/STREAM_PERFORMANCE.md, Option B). On a slow CPU,
 # processing every frame builds an ever-growing latency backlog. We cap inference to
@@ -114,7 +121,7 @@ def _compute_mpn(detections: list, total_count: int) -> dict:
 
 @router.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    return templates.TemplateResponse(request, "index.html", {"v": _ASSET_VERSION})
 
 
 @router.get("/health")
