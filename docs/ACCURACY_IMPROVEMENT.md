@@ -360,6 +360,15 @@ equally.
 - **Target:** best-effort. Set client expectations: reliable in decent light and a roughly
   straight-on framing; degrades with extreme wide-angle, glare, or clutter.
 
+**Hardening the capture (implemented — "option B"):** a common user won't know to use the
+1× lens, hold straight-on, and centre the rack. So the phone **Aim & Capture** preview now
+draws an **on-screen alignment guide** — a 9-slot rack outline plus a plain-language hint
+(*"use the 1× lens, hold straight-on, fill the frame"*). Lining the rack up inside the guide
+keeps all 9 tubes in the centre low-distortion zone and reduces the edge-blend that made the
+end tubes disappear. It's a framing aid only (detection still runs full-frame); it does not
+undistort the lens — that's the next step ("option C": OpenCV camera-calibration `undistort`
+in preprocessing). The durable fix remains a diverse phone dataset.
+
 > **Design consequence:** the app already exposes an **inference mode** (Live vs Aim &
 > Capture) and a **model backend** badge. The jig path will additionally gain a **fixed-ROI
 > mode** (calibrate once, then classify fixed crops); the phone path stays on full-frame

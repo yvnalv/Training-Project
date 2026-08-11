@@ -583,6 +583,7 @@ function stopCamera() {
     const _v = document.getElementById('videoElement');
     if (_v) { _v.style.display = 'none'; _v.srcObject = null; }
     _setCaptureBtn(false);
+    _setAlignGuide(false);
     document.getElementById('streamResult').style.display = 'block';
 
     document.getElementById('startBtn').disabled = false;
@@ -596,6 +597,13 @@ function stopCamera() {
 
 let _captureShown = false;          // a captured reading is currently frozen on screen
 let _captureResumeTimer = null;
+
+// Alignment guide overlay (phone Aim & Capture framing aid). Shown while the user is
+// aiming the raw preview; hidden once a reading is frozen on screen. See docs.
+function _setAlignGuide(show) {
+    const g = document.getElementById('alignGuide');
+    if (g) g.classList.toggle('on', !!show);
+}
 
 function _setCaptureBtn(show) {
     const btn = document.getElementById('captureAnalyzeBtn');
@@ -616,6 +624,7 @@ async function _startClientPreview() {
         video.play();
         video.style.display = 'block';
         document.getElementById('streamResult').style.display = 'none';
+        _setAlignGuide(true);   // help the user frame while aiming
     } catch (err) {
         console.error("client preview error:", err);
         alert("Could not access camera: " + err.message);
@@ -674,6 +683,7 @@ async function captureAnalyze() {
 // Freeze a captured reading on screen, then auto-resume the live preview.
 function _showCaptureResult(data) {
     _captureShown = true;
+    _setAlignGuide(false);   // reading is frozen on screen — hide the guide
     const img = document.getElementById('streamResult');
     img.src = 'data:image/jpeg;base64,' + data.image;
     img.style.display = 'block';
@@ -692,6 +702,7 @@ function _resumePreview() {
         const video = document.getElementById('videoElement');
         if (video) video.style.display = 'block';
         document.getElementById('streamResult').style.display = 'none';
+        _setAlignGuide(true);   // back to aiming — show the guide again
     }
     // Server mode resumes automatically — the next preview frame paints (flag cleared).
 }

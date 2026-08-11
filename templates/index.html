@@ -179,6 +179,27 @@
           <video id="videoElement" playsinline style="display:none;"></video>
           <canvas id="canvasElement" style="display:none;"></canvas>
           <img id="streamResult" alt="Live feed">
+          <!-- Alignment guide (phone Aim & Capture): helps common users frame the rack
+               straight-on and centred, where lens distortion is lowest. See docs. -->
+          <div id="alignGuide" class="align-guide" aria-hidden="true">
+            <div class="align-hint">
+              <i class="fa-solid fa-crosshairs"></i>
+              Line the rack up inside the guide · use the <b>1× lens</b> (not ultra-wide) ·
+              hold <b>straight-on</b> &amp; fill the frame
+            </div>
+            <svg class="align-frame" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid meet">
+              <rect class="ag-rack" x="10" y="38" width="300" height="112" rx="12"/>
+              <rect class="ag-slot" x="22"  y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="53"  y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="84"  y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="115" y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="146" y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="177" y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="208" y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="239" y="52" width="18" height="86" rx="5"/>
+              <rect class="ag-slot" x="270" y="52" width="18" height="86" rx="5"/>
+            </svg>
+          </div>
         </div>
 
         <!-- MPN live result -->
