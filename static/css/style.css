@@ -1761,3 +1761,58 @@ tbody tr:hover td { background: var(--bg-hover); }
 }
 .backend-badge.ok   { background: #14361b; color: #9ae6a0; }   /* NCNN — fast */
 .backend-badge.warn { background: #4a3210; color: #ffcf87; }   /* PyTorch — slow */
+
+/* ── Fixed-ROI calibration modal (jig mode) ─────────────────── */
+.calib-box { max-width: 900px; }
+.calib-body { padding: 0 1.25rem; }
+.calib-hint { color: var(--text-muted); font-size: 0.85rem; margin: 0.5rem 0 0.75rem; }
+.calib-stage {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    line-height: 0;              /* kill inline-image gap */
+    touch-action: none;         /* let pointer-drag work on touch */
+    user-select: none;
+    -webkit-user-select: none;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md, 8px);
+    overflow: hidden;
+}
+.calib-stage img { display: block; max-width: 100%; height: auto; pointer-events: none; }
+.roi-box {
+    position: absolute;
+    box-sizing: border-box;
+    border: 2px solid var(--accent, #b6f200);
+    background: rgba(182, 242, 0, 0.10);
+    cursor: move;
+    touch-action: none;
+}
+.roi-box.selected {
+    border-color: #ff5d9e;
+    background: rgba(255, 93, 158, 0.14);
+    z-index: 3;
+}
+.roi-num {
+    position: absolute;
+    top: -1px; left: -1px;
+    background: var(--accent, #b6f200);
+    color: #0d0d0d;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 3px 0 4px 0;
+}
+.roi-box.selected .roi-num { background: #ff5d9e; color: #fff; }
+.roi-handle {
+    position: absolute;
+    right: -7px; bottom: -7px;
+    width: 14px; height: 14px;
+    background: #fff;
+    border: 2px solid var(--accent, #b6f200);
+    border-radius: 50%;
+    cursor: nwse-resize;
+    touch-action: none;
+}
+.roi-box.selected .roi-handle { border-color: #ff5d9e; }
+.calib-footer { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; padding: 1rem 1.25rem; }

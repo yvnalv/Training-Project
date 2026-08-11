@@ -52,6 +52,35 @@ _STREAM_MIN_INTERVAL = 1.0 / _STREAM_MAX_FPS if _STREAM_MAX_FPS > 0 else 0.0
 # Helper: MPN calculation
 # ---------------------------------------------------------------------------
 
+def _active_rois():
+    """
+    Return the 9 saved ROI boxes if fixed-ROI (jig) mode is ON and calibrated to exactly
+    9 valid boxes; otherwise None (caller falls back to full-frame detection).
+
+    ROIs are stored in settings as `roiBoxes` (JSON string: 9× normalised [x1,y1,x2,y2],
+    tube order) with `roiMode` truthy. See docs/FIXED_ROI_DESIGN.md.
+    """
+    try:
+        s = get_all_settings()
+    except Exception:
+        return None
+    if str(s.get("roiMode", "")).strip().lower() not in ("1", "true", "on", "yes"):
+        return None
+    raw = s.get("roiBoxes")
+    if not raw:
+        return None
+    try:
+        boxes = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not isinstance(boxes, list) or len(boxes) != 9:
+        return None
+    for b in boxes:
+        if not (isinstance(b, (list, tuple)) and len(b) == 4):
+            return None
+    return boxes
+
+
 def _compute_mpn(detections: list, total_count: int) -> dict:
     """
     Return MPN fields for a given detection list.
@@ -105,9 +134,17 @@ async def predict(
 ):
     image_bytes = await file.read()
 
-    detections, total_count, annotated_img_bytes = inference.run_inference_with_count(
-        image_bytes, conf=conf, scale_factor=(1.0 if full else 0.5)
-    )
+    # Fixed-ROI (jig) mode takes precedence when calibrated: classify the 9 known tube
+    # positions instead of detecting them (always full-res crops). See FIXED_ROI_DESIGN.md.
+    rois = _active_rois()
+    if rois:
+        detections, total_count, annotated_img_bytes = inference.run_inference_fixed_roi(
+            image_bytes, rois, conf=conf
+        )
+    else:
+        detections, total_count, annotated_img_bytes = inference.run_inference_with_count(
+            image_bytes, conf=conf, scale_factor=(1.0 if full else 0.5)
+        )
 
     if total_count != 9:
         logger.warning(
@@ -149,6 +186,32 @@ async def predict(
         "ci_high":     mpn["ci_high"],
         "image":       img_b64,
     })
+
+
+# ---------------------------------------------------------------------------
+# REST — fixed-ROI calibration (jig mode)
+# ---------------------------------------------------------------------------
+
+@router.post("/calibrate")
+async def calibrate(file: UploadFile, conf: float = Form(default=0.4)):
+    """
+    Seed the fixed-ROI positions from a reference frame (jig mode).
+
+    Runs full-frame detection on the uploaded image and returns the detected tube boxes as
+    normalised [x1,y1,x2,y2] (0..1), left→right, padded — for the frontend to overlay and
+    let the operator confirm/nudge before saving. Does NOT persist; the client saves the
+    (possibly edited) boxes via PUT /settings as `roiBoxes`. See docs/FIXED_ROI_DESIGN.md.
+
+    Response: {"rois": [[x1,y1,x2,y2], ...], "count": <int>, "expected": 9}
+    """
+    image_bytes = await file.read()
+    try:
+        rois, count = inference.detect_rois_normalized(image_bytes, conf=conf)
+    except Exception as e:
+        logger.exception("/calibrate: detection failed")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return JSONResponse(content={"rois": rois, "count": count, "expected": 9})
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +355,9 @@ async def put_settings_endpoint(request: Request):
     Only known setting keys are persisted; unknown keys are silently ignored.
     """
     ALLOWED_KEYS = {"cameraMode", "fps", "resolution", "confidence", "flipHorizontal",
-                    "inferenceMode"}
+                    "inferenceMode",
+                    # Fixed-ROI (jig) mode — see docs/FIXED_ROI_DESIGN.md
+                    "roiMode", "roiBoxes", "roiCalibratedAt"}
     try:
         body = await request.json()
     except Exception:
@@ -465,9 +530,15 @@ async def websocket_endpoint(websocket: WebSocket):
                             if frame is not None:
                                 ok, enc = cv2.imencode(".jpg", frame)
                                 if ok:
-                                    dets, cnt, ann = inference.run_inference_with_count(
-                                        enc.tobytes(), conf=session_conf, scale_factor=1.0
-                                    )
+                                    rois = _active_rois()
+                                    if rois:
+                                        dets, cnt, ann = inference.run_inference_fixed_roi(
+                                            enc.tobytes(), rois, conf=session_conf
+                                        )
+                                    else:
+                                        dets, cnt, ann = inference.run_inference_with_count(
+                                            enc.tobytes(), conf=session_conf, scale_factor=1.0
+                                        )
                                     await websocket.send_json({
                                         "mode": "server",
                                         "capture": True,

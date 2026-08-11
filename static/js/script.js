@@ -10,7 +10,9 @@ let state = {
     confidence: 0.25,
     isStreaming: false,
     cameraMode: 'client', // 'client' | 'server'  — overridden by loadSettings()
-    inferenceMode: 'live' // 'live' | 'snapshot' (Aim & Capture) — overridden by loadSettings()
+    inferenceMode: 'live', // 'live' | 'snapshot' (Aim & Capture) — overridden by loadSettings()
+    roiMode: false,       // fixed-ROI (jig) mode on/off — overridden by loadSettings()
+    roiBoxes: null        // saved 9 normalized [x1,y1,x2,y2] boxes, or null — see FIXED_ROI_DESIGN.md
 };
 
 
@@ -1355,6 +1357,14 @@ async function loadSettings() {
             else                      { beEl.textContent = be;                 beEl.className = 'backend-badge'; }
         }
 
+        // fixed-ROI (jig) mode: toggle + calibration status
+        state.roiMode = String(saved.roiMode).toLowerCase() === 'true';
+        const roiToggle = document.getElementById('roiModeToggle');
+        if (roiToggle) roiToggle.checked = state.roiMode;
+        try { state.roiBoxes = saved.roiBoxes ? JSON.parse(saved.roiBoxes) : null; }
+        catch { state.roiBoxes = null; }
+        _updateRoiStatus(saved.roiCalibratedAt, state.roiBoxes);
+
         // network IP
         const ipEl = document.getElementById('networkIp');
         if (ipEl) ipEl.textContent = data.network_ip || 'No Network';
@@ -1388,4 +1398,229 @@ function renderGuidelineTable() {
         `;
         tbody.appendChild(tr);
     });
+}
+
+
+// ---------------------------------------------------------------------------
+// Fixed-ROI (jig mode) — calibration editor. See docs/FIXED_ROI_DESIGN.md.
+// Boxes are held as normalized {x, y, w, h} (top-left + size, 0..1). Saved to
+// settings as `roiBoxes` = JSON [[x1,y1,x2,y2], ...] in left→right tube order.
+// ---------------------------------------------------------------------------
+
+let _calibBoxes = [];        // [{x,y,w,h}]  normalized
+let _calibSelected = -1;     // index of selected box, or -1
+let _calibBlob = null;       // reference frame blob (for /calibrate re-POST)
+
+function _updateRoiStatus(calibratedAt, boxes) {
+    const el = document.getElementById('roiStatus');
+    if (!el) return;
+    const n = Array.isArray(boxes) ? boxes.length : 0;
+    if (n === 9) {
+        const when = calibratedAt ? new Date(calibratedAt).toLocaleString() : '';
+        el.textContent = 'Calibrated (9)' + (when ? ' · ' + when : '');
+        el.className = 'backend-badge ok';
+    } else {
+        el.textContent = 'Not calibrated';
+        el.className = 'backend-badge warn';
+    }
+}
+
+async function onRoiModeToggle(checked) {
+    state.roiMode = !!checked;
+    if (checked && !(Array.isArray(state.roiBoxes) && state.roiBoxes.length === 9)) {
+        alert('Fixed-ROI mode is on, but positions aren\'t calibrated yet — click "Calibrate positions". Until then the app falls back to normal detection.');
+    }
+    try {
+        await fetch('/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roiMode: state.roiMode }),
+        });
+    } catch (e) { console.warn('Could not save roiMode:', e); }
+}
+
+// Grab one reference frame from the active camera source → {dataUrl, blob}.
+async function _grabReferenceFrame() {
+    if (state.cameraMode === 'server') {
+        const res = await fetch('/capture');
+        if (!res.ok) throw new Error('Server capture failed (' + res.status + ')');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        const dataUrl = 'data:image/jpeg;base64,' + data.image;
+        const blob = await (await fetch(dataUrl)).blob();
+        return { dataUrl, blob };
+    }
+    // Client camera: open a short-lived stream, grab one frame, stop it.
+    const [width, height] = state.resolution.split('x').map(Number);
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width, height, facingMode: { ideal: 'environment' } }
+    });
+    try {
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        await video.play();
+        await new Promise(r => setTimeout(r, 400)); // let exposure settle
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
+        return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), blob };
+    } finally {
+        stream.getTracks().forEach(t => t.stop());
+    }
+}
+
+async function openCalibration() {
+    // The server camera can't be opened twice — stop any live stream first.
+    if (state.isStreaming && state.cameraMode === 'server') {
+        alert('Stop the live stream before calibrating (it holds the camera).');
+        return;
+    }
+    const modal = document.getElementById('calibrateModal');
+    modal.classList.add('open');
+    document.getElementById('calibImage').removeAttribute('src');
+    _calibBoxes = []; _calibSelected = -1; _renderRoiBoxes();
+    // Seed from previously-saved boxes if present.
+    if (Array.isArray(state.roiBoxes) && state.roiBoxes.length) {
+        _calibBoxes = state.roiBoxes.map(b => ({ x: b[0], y: b[1], w: b[2] - b[0], h: b[3] - b[1] }));
+    }
+    try {
+        const { dataUrl, blob } = await _grabReferenceFrame();
+        _calibBlob = blob;
+        document.getElementById('calibImage').src = dataUrl;
+        if (!_calibBoxes.length) await autoDetectRois();
+        else _renderRoiBoxes();
+    } catch (e) {
+        alert('Could not get a reference frame: ' + e.message);
+    }
+}
+
+function closeCalibration() {
+    document.getElementById('calibrateModal').classList.remove('open');
+}
+
+async function recapculateCalibration() {
+    try {
+        const { dataUrl, blob } = await _grabReferenceFrame();
+        _calibBlob = blob;
+        document.getElementById('calibImage').src = dataUrl;
+    } catch (e) { alert('Could not get a new frame: ' + e.message); }
+}
+
+async function autoDetectRois() {
+    if (!_calibBlob) { alert('No reference frame yet.'); return; }
+    try {
+        const fd = new FormData();
+        fd.append('file', _calibBlob, 'calib.jpg');
+        fd.append('conf', state.confidence);
+        const res = await fetch('/calibrate', { method: 'POST', body: fd });
+        if (!res.ok) throw new Error('Server error ' + res.status);
+        const data = await res.json();
+        _calibBoxes = (data.rois || []).map(b => ({ x: b[0], y: b[1], w: b[2] - b[0], h: b[3] - b[1] }));
+        _calibSelected = -1;
+        _renderRoiBoxes();
+    } catch (e) { alert('Auto-detect failed: ' + e.message); }
+}
+
+function addRoiBox() {
+    // Default box near center; operator drags into place.
+    _calibBoxes.push({ x: 0.45, y: 0.4, w: 0.08, h: 0.2 });
+    _calibSelected = _calibBoxes.length - 1;
+    _renderRoiBoxes();
+}
+
+function removeSelectedRoi() {
+    if (_calibSelected < 0) { return; }
+    _calibBoxes.splice(_calibSelected, 1);
+    _calibSelected = -1;
+    _renderRoiBoxes();
+}
+
+function _updateCalibCount() {
+    const n = _calibBoxes.length;
+    const cnt = document.getElementById('calibCount');
+    if (cnt) { cnt.textContent = n + ' / 9'; cnt.className = 'backend-badge ' + (n === 9 ? 'ok' : 'warn'); }
+    const save = document.getElementById('calibSaveBtn');
+    if (save) save.disabled = (n !== 9);
+}
+
+function _renderRoiBoxes() {
+    const stage = document.getElementById('calibStage');
+    if (!stage) return;
+    // Clear existing box elements (keep the <img>).
+    stage.querySelectorAll('.roi-box').forEach(el => el.remove());
+    // Draw ordered left→right so labels reflect tube order.
+    const order = _calibBoxes.map((b, i) => i).sort((a, b) => (_calibBoxes[a].x + _calibBoxes[a].w / 2) - (_calibBoxes[b].x + _calibBoxes[b].w / 2));
+    order.forEach((idx, rank) => {
+        const b = _calibBoxes[idx];
+        const el = document.createElement('div');
+        el.className = 'roi-box' + (idx === _calibSelected ? ' selected' : '');
+        el.style.left = (b.x * 100) + '%';
+        el.style.top = (b.y * 100) + '%';
+        el.style.width = (b.w * 100) + '%';
+        el.style.height = (b.h * 100) + '%';
+        el.innerHTML = `<span class="roi-num">${rank + 1}</span><span class="roi-handle"></span>`;
+        el.addEventListener('pointerdown', (e) => _roiPointerDown(e, idx, false));
+        el.querySelector('.roi-handle').addEventListener('pointerdown', (e) => _roiPointerDown(e, idx, true));
+        stage.appendChild(el);
+    });
+    _updateCalibCount();
+}
+
+function _roiPointerDown(e, idx, isResize) {
+    e.preventDefault();
+    e.stopPropagation();
+    _calibSelected = idx;
+    const stage = document.getElementById('calibStage');
+    const rect = stage.getBoundingClientRect();
+    const start = { px: e.clientX, py: e.clientY, box: { ..._calibBoxes[idx] } };
+
+    const move = (ev) => {
+        const dx = (ev.clientX - start.px) / rect.width;
+        const dy = (ev.clientY - start.py) / rect.height;
+        const b = _calibBoxes[idx];
+        if (isResize) {
+            b.w = Math.max(0.02, Math.min(1 - start.box.x, start.box.w + dx));
+            b.h = Math.max(0.02, Math.min(1 - start.box.y, start.box.h + dy));
+        } else {
+            b.x = Math.max(0, Math.min(1 - start.box.w, start.box.x + dx));
+            b.y = Math.max(0, Math.min(1 - start.box.h, start.box.y + dy));
+        }
+        _renderRoiBoxes();
+    };
+    const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+}
+
+async function saveCalibration() {
+    if (_calibBoxes.length !== 9) { alert('Need exactly 9 boxes.'); return; }
+    // Order left→right and convert to [x1,y1,x2,y2] normalized.
+    const ordered = [..._calibBoxes].sort((a, b) => (a.x + a.w / 2) - (b.x + b.w / 2));
+    const boxes = ordered.map(b => [
+        +b.x.toFixed(4), +b.y.toFixed(4),
+        +(b.x + b.w).toFixed(4), +(b.y + b.h).toFixed(4),
+    ]);
+    const calibratedAt = new Date().toISOString();
+    try {
+        await fetch('/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                roiBoxes: JSON.stringify(boxes),
+                roiCalibratedAt: calibratedAt,
+                roiMode: true,
+            }),
+        });
+        state.roiBoxes = boxes;
+        state.roiMode = true;
+        const roiToggle = document.getElementById('roiModeToggle');
+        if (roiToggle) roiToggle.checked = true;
+        _updateRoiStatus(calibratedAt, boxes);
+        closeCalibration();
+    } catch (e) { alert('Could not save calibration: ' + e.message); }
 }

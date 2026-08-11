@@ -63,6 +63,13 @@ model = YOLO(_resolve_model_path(), task="detect")
 
 _MAX_TUBES = 9
 
+# Fixed-ROI (jig) mode — see docs/FIXED_ROI_DESIGN.md.
+# ROI_PAD expands each auto-seeded box outward (fraction of its size) so a slightly
+# shifted tube still falls inside its crop. UNCERTAIN_LABEL marks a crop the model
+# couldn't classify (rendered "?" and counted as negative for MPN, but surfaced).
+_ROI_PAD = 0.08
+UNCERTAIN_LABEL = "uncertain"
+
 
 def _iou(a, b):
     """Intersection-over-Union for two [x1, y1, x2, y2] boxes."""
@@ -164,6 +171,100 @@ def tubes_to_xyz(tubes):
 
 
 # ---------------------------------------------------------------------------
+# Shared annotation
+# ---------------------------------------------------------------------------
+
+def _draw_annotations(image, detections, total_count):
+    """
+    Draw tube boxes (with 1 / 0 / ? labels) and the total-count badge onto a copy
+    of `image`, returning the annotated JPEG bytes. Shared by the full-frame path
+    (run_inference_with_count) and the fixed-ROI path (run_inference_fixed_roi).
+
+    Label rules:
+      yellow_positive  -> "1" (green)
+      uncertain        -> "?" (amber)  — fixed-ROI crop the model couldn't classify
+      otherwise        -> "0" (grey)
+    """
+    im = image.copy()
+    draw = ImageDraw.Draw(im)
+    img_width, img_height = im.size
+
+    box_thickness = max(3, img_width // 220)
+
+    if detections:
+        tube_height = int(detections[0]["bbox"][3] - detections[0]["bbox"][1])
+    else:
+        tube_height = img_height // 4
+
+    font_size = max(18, int(tube_height * 0.13))
+
+    # FIX: use _FONT_PATH (absolute, based on this file's location) instead of
+    # the old relative string which was resolved from the working directory.
+    try:
+        font = ImageFont.truetype(str(_FONT_PATH), font_size)
+    except (OSError, IOError):
+        logger.warning(
+            "Could not load font at '%s'. Falling back to PIL default font.",
+            _FONT_PATH,
+        )
+        font = ImageFont.load_default()
+
+    padding = font_size // 4
+
+    for det in detections:
+        x1, y1, x2, y2 = map(int, det["bbox"])
+
+        if det["label"] == POSITIVE_LABEL:
+            label_text, color = "1", (0, 180, 0)
+        elif det["label"] == UNCERTAIN_LABEL:
+            label_text, color = "?", (210, 150, 0)
+        else:
+            label_text, color = "0", (120, 120, 120)
+
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=box_thickness)
+
+        text_bbox = draw.textbbox((0, 0), label_text, font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+        text_h = text_bbox[3] - text_bbox[1]
+
+        text_x = x1 + padding
+        text_y = y1 + padding
+
+        draw.rectangle(
+            [text_x - padding, text_y - padding,
+             text_x + text_w + padding, text_y + text_h + padding],
+            fill=color
+        )
+        draw.text((text_x, text_y), label_text, fill=(255, 255, 255), font=font)
+
+    # ---- Draw total tube count (bottom-right) ----
+    count_text = f"Total Tubes: {total_count}"
+    count_bbox = draw.textbbox((0, 0), count_text, font=font)
+    count_w = count_bbox[2] - count_bbox[0]
+    count_h = count_bbox[3] - count_bbox[1]
+    margin = 30
+    count_x = img_width - count_w - padding * 2 - margin
+    count_y = img_height - count_h - padding * 2 - margin
+
+    draw.rectangle(
+        [count_x, count_y,
+         count_x + count_w + padding * 2,
+         count_y + count_h + padding * 2],
+        fill=(0, 0, 0)
+    )
+    draw.text(
+        (count_x + padding, count_y + padding),
+        count_text,
+        fill=(255, 255, 255),
+        font=font
+    )
+
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # Public inference entry point
 # ---------------------------------------------------------------------------
 
@@ -213,84 +314,123 @@ def run_inference_with_count(image_bytes: bytes, conf: float = 0.4,
     detections = suppress_duplicate_tubes(detections)
     total_count = len(detections)
 
-    # ---- Drawing setup ----
-    im = image.copy()
-    draw = ImageDraw.Draw(im)
-    img_width, img_height = im.size
+    # ---- Annotate & return ----
+    annotated = _draw_annotations(image, detections, total_count)
+    return detections, total_count, annotated
 
-    box_thickness = max(3, img_width // 220)
 
-    if detections:
-        tube_height = int(detections[0]["bbox"][3] - detections[0]["bbox"][1])
-    else:
-        tube_height = img_height // 4
+# ---------------------------------------------------------------------------
+# Fixed-ROI (jig) mode — see docs/FIXED_ROI_DESIGN.md
+# ---------------------------------------------------------------------------
 
-    font_size = max(18, int(tube_height * 0.13))
+def detect_rois_normalized(image_bytes: bytes, conf: float = 0.4):
+    """
+    Calibration seed: run full-frame detection and return the detected tube boxes as
+    **normalised** [x1, y1, x2, y2] (fractions of width/height), sorted left→right, each
+    padded outward by _ROI_PAD. The frontend overlays these for the operator to confirm /
+    nudge before saving as the fixed ROIs.
 
-    # FIX: use _FONT_PATH (absolute, based on this file's location) instead of
-    # the old relative string which was resolved from the working directory.
-    try:
-        font = ImageFont.truetype(str(_FONT_PATH), font_size)
-    except (OSError, IOError):
-        logger.warning(
-            "Could not load font at '%s'. Falling back to PIL default font.",
-            _FONT_PATH,
-        )
-        font = ImageFont.load_default()
+    Returns:
+        rois (list[list[float]]): normalised, padded boxes (0..1), left→right.
+        count (int):              how many were found (may be != 9; operator fixes up).
+    """
+    conf = max(0.05, min(0.95, conf))
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    W, H = image.width, image.height
 
-    padding = font_size // 4
+    results = model(image, conf=conf, iou=0.6, agnostic_nms=True)
+    result = results[0]
 
-    # ---- Draw detections ----
-    for det in detections:
-        x1, y1, x2, y2 = map(int, det["bbox"])
+    boxes = result.boxes
+    detections = []
+    if boxes is not None and len(boxes) > 0:
+        for b in boxes:
+            detections.append({
+                "label": result.names[int(b.cls)],
+                "confidence": float(b.conf),
+                "bbox": b.xyxy.tolist()[0],
+            })
 
-        if det["label"] == POSITIVE_LABEL:
-            label_text, color = "1", (0, 180, 0)
-        else:
-            label_text, color = "0", (120, 120, 120)
+    detections = suppress_duplicate_tubes(detections)
 
-        draw.rectangle([x1, y1, x2, y2], outline=color, width=box_thickness)
+    rois = []
+    for d in detections:
+        x1, y1, x2, y2 = d["bbox"]
+        pad_x = (x2 - x1) * _ROI_PAD
+        pad_y = (y2 - y1) * _ROI_PAD
+        rois.append([
+            max(0.0, (x1 - pad_x) / W),
+            max(0.0, (y1 - pad_y) / H),
+            min(1.0, (x2 + pad_x) / W),
+            min(1.0, (y2 + pad_y) / H),
+        ])
+    return rois, len(rois)
 
-        text_bbox = draw.textbbox((0, 0), label_text, font=font)
-        text_w = text_bbox[2] - text_bbox[0]
-        text_h = text_bbox[3] - text_bbox[1]
 
-        text_x = x1 + padding
-        text_y = y1 + padding
+def _classify_crop(crop, conf: float):
+    """
+    Classify a single tube crop. Because the crop is a known tube position, we run the
+    detection model on it and take the highest-confidence detection's class. A lower
+    threshold is used than full-frame detection (the crop contains exactly one tube, so
+    false positives aren't a concern and we'd rather classify than miss).
 
-        draw.rectangle(
-            [text_x - padding, text_y - padding,
-             text_x + text_w + padding, text_y + text_h + padding],
-            fill=color
-        )
-        draw.text((text_x, text_y), label_text, fill=(255, 255, 255), font=font)
+    Returns (label, confidence). If nothing fires, returns (UNCERTAIN_LABEL, 0.0).
+    """
+    crop_conf = max(0.10, conf * 0.5)
+    results = model(crop, conf=crop_conf, iou=0.6, agnostic_nms=True)
+    result = results[0]
+    boxes = result.boxes
+    if boxes is None or len(boxes) == 0:
+        return UNCERTAIN_LABEL, 0.0
+    best = max(boxes, key=lambda b: float(b.conf))
+    return result.names[int(best.cls)], float(best.conf)
 
-    # ---- Draw total tube count (bottom-right) ----
-    count_text = f"Total Tubes: {total_count}"
-    count_bbox = draw.textbbox((0, 0), count_text, font=font)
-    count_w = count_bbox[2] - count_bbox[0]
-    count_h = count_bbox[3] - count_bbox[1]
-    margin = 30
-    count_x = img_width - count_w - padding * 2 - margin
-    count_y = img_height - count_h - padding * 2 - margin
 
-    draw.rectangle(
-        [count_x, count_y,
-         count_x + count_w + padding * 2,
-         count_y + count_h + padding * 2],
-        fill=(0, 0, 0)
-    )
-    draw.text(
-        (count_x + padding, count_y + padding),
-        count_text,
-        fill=(255, 255, 255),
-        font=font
-    )
+def run_inference_fixed_roi(image_bytes: bytes, rois, conf: float = 0.4):
+    """
+    Fixed-ROI pipeline (jig mode): instead of *detecting* tubes, crop the N known ROI
+    positions and *classify* each. Always returns len(rois) results, so on a 9-ROI jig
+    total_count == 9 and MPN is always computed — an edge tube that blends into the rig
+    is impossible to miss (see docs/FIXED_ROI_DESIGN.md).
 
-    # ---- Return ----
-    buf = io.BytesIO()
-    im.save(buf, format="JPEG")
-    return detections, total_count, buf.getvalue()
+    Args:
+        image_bytes: Raw full-resolution frame (any format PIL can open).
+        rois:        List of normalised [x1, y1, x2, y2] boxes (0..1), in tube order 0..N.
+        conf:        Confidence threshold; halved internally for per-crop classification.
+
+    Returns:
+        detections (list[dict]): one per ROI — 'label', 'confidence', 'bbox' (pixel coords).
+        total_count (int):       len(rois).
+        annotated_image (bytes): JPEG with the ROI boxes + 1/0/? labels drawn.
+    """
+    conf = max(0.05, min(0.95, conf))
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    W, H = image.width, image.height
+
+    detections = []
+    for roi in rois:
+        rx1, ry1, rx2, ry2 = roi
+        x1 = int(min(rx1, rx2) * W)
+        y1 = int(min(ry1, ry2) * H)
+        x2 = int(max(rx1, rx2) * W)
+        y2 = int(max(ry1, ry2) * H)
+        # Clamp to image bounds and guarantee a non-empty crop.
+        x1 = max(0, min(x1, W - 1))
+        y1 = max(0, min(y1, H - 1))
+        x2 = max(x1 + 1, min(x2, W))
+        y2 = max(y1 + 1, min(y2, H))
+
+        crop = image.crop((x1, y1, x2, y2))
+        label, confidence = _classify_crop(crop, conf)
+        detections.append({
+            "label": label,
+            "confidence": confidence,
+            "bbox": [x1, y1, x2, y2],
+        })
+
+    total_count = len(detections)
+    annotated = _draw_annotations(image, detections, total_count)
+    return detections, total_count, annotated
 
 
 # ---------------------------------------------------------------------------

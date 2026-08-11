@@ -78,7 +78,11 @@ full frame. If no detection fires, the tube is **uncertain** (see above).
   `inference.py`, mirroring `run_inference_with_count`'s return shape
   `(detections, total_count, annotated_jpeg)` so callers are drop-in.
 - **`/predict`** and the **WS `capture_now`** path use the ROI pipeline **iff** `roiMode`
-  is on and `roiBoxes` is calibrated; otherwise they fall back to full-frame detection.
+  is on and `roiBoxes` is calibrated (exactly 9 valid boxes); otherwise they fall back to
+  full-frame detection. **v1 scope:** ROI applies to the **capture / reading path** only;
+  the **Live** per-frame preview stays full-frame detection (for aiming feedback, and to
+  avoid 9 model calls per frame). On the jig, pair ROI with **Aim & Capture** — the reading
+  it produces is the ROI one. (Per-frame ROI in Live is a possible later addition.)
 - **Platform default:** Pi → ROI mode *available* (off until calibrated); phone/VPS → ROI
   controls **hidden** (no fixed jig, so ROIs are meaningless).
 
