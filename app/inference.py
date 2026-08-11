@@ -27,16 +27,24 @@ _NCNN_DIR = _MODELS_DIR / "best_ncnn_model"
 _PT_PATH = _MODELS_DIR / "vialvision_yolo26.pt"
 
 
+# Which backend actually loaded — exposed to the UI (Settings shows an NCNN/PyTorch
+# badge) so it's obvious on each deployment whether the fast path is in use.
+MODEL_BACKEND = "unknown"
+
+
 def _resolve_model_path() -> str:
+    global MODEL_BACKEND
     if _NCNN_DIR.exists():
         try:
             import ncnn  # noqa: F401 — is the NCNN runtime available?
             logger.info("Using NCNN model at %s", _NCNN_DIR)
+            MODEL_BACKEND = "ncnn"
             return str(_NCNN_DIR)
         except Exception:
             logger.info("ncnn runtime not installed; falling back to PyTorch weights.")
     if _PT_PATH.exists():
         logger.info("Using PyTorch model at %s", _PT_PATH)
+        MODEL_BACKEND = "pytorch"
         return str(_PT_PATH)
     raise FileNotFoundError(
         f"No model found in {_MODELS_DIR}. Copy the trained model there "
@@ -159,14 +167,18 @@ def tubes_to_xyz(tubes):
 # Public inference entry point
 # ---------------------------------------------------------------------------
 
-def run_inference_with_count(image_bytes: bytes, conf: float = 0.4):
+def run_inference_with_count(image_bytes: bytes, conf: float = 0.4,
+                             scale_factor: float = 0.5):
     """
     Full inference pipeline: load image -> downscale -> YOLO -> deduplicate ->
     annotate -> return results.
 
     Args:
-        image_bytes: Raw image file contents (any format PIL can open).
-        conf:        YOLO confidence threshold (0.0-1.0). Defaults to 0.4.
+        image_bytes:  Raw image file contents (any format PIL can open).
+        conf:         YOLO confidence threshold (0.0-1.0). Defaults to 0.4.
+        scale_factor: Pre-inference resize factor. 0.5 (default) is the fast live-stream
+                      path; pass 1.0 for a full-resolution "Aim & Capture" reading (most
+                      accurate). See docs/STREAM_PERFORMANCE.md (Two inference modes).
 
     Returns:
         detections (list[dict]): Each dict has 'label', 'confidence', 'bbox'.
@@ -174,13 +186,14 @@ def run_inference_with_count(image_bytes: bytes, conf: float = 0.4):
         annotated_image (bytes): JPEG image with bounding boxes drawn.
     """
     conf = max(0.05, min(0.95, conf))
+    scale_factor = max(0.1, min(1.0, scale_factor))
 
-    # ---- Load & downscale image (50%) ----
+    # ---- Load & (optionally) downscale image ----
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    scale_factor = 0.5
-    new_w = int(image.width * scale_factor)
-    new_h = int(image.height * scale_factor)
-    image = image.resize((new_w, new_h), Image.LANCZOS)
+    if scale_factor < 1.0:
+        new_w = int(image.width * scale_factor)
+        new_h = int(image.height * scale_factor)
+        image = image.resize((new_w, new_h), Image.LANCZOS)
 
     # ---- Run YOLO ----
     results = model(image, conf=conf, iou=0.6, agnostic_nms=True)

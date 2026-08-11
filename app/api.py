@@ -101,11 +101,12 @@ async def health():
 async def predict(
     file: UploadFile,
     conf: float = Form(default=0.4),
+    full: bool = Form(default=False),   # True = full-res (Aim & Capture); else 50% downscale
 ):
     image_bytes = await file.read()
 
     detections, total_count, annotated_img_bytes = inference.run_inference_with_count(
-        image_bytes, conf=conf
+        image_bytes, conf=conf, scale_factor=(1.0 if full else 0.5)
     )
 
     if total_count != 9:
@@ -248,10 +249,18 @@ def _platform_info() -> dict:
         has_picamera2 = True
     except Exception:
         has_picamera2 = False
+    is_raspi = is_linux and has_picamera2
     return {
-        "is_raspi": is_linux and has_picamera2,
+        "is_raspi": is_raspi,
         "has_picamera2": has_picamera2,
         "default_camera_mode": "server" if has_picamera2 else "client",
+        # Which inference backend actually loaded ("ncnn" = fast CPU path, "pytorch" =
+        # slower fallback). Shown as a badge in Settings. See docs/STREAM_PERFORMANCE.md.
+        "model_backend": inference.MODEL_BACKEND,
+        # Default inference mode: the Pi (NCNN + multiple cores) can do live video;
+        # elsewhere (e.g. the 1-vCPU VPS) default to "snapshot" (smooth preview + one
+        # accurate capture). User can override in Settings; the choice is persisted.
+        "default_inference_mode": "live" if is_raspi else "snapshot",
     }
 
 
@@ -282,7 +291,8 @@ async def put_settings_endpoint(request: Request):
     Upsert UI settings. Accepts a JSON body of {key: value} pairs.
     Only known setting keys are persisted; unknown keys are silently ignored.
     """
-    ALLOWED_KEYS = {"cameraMode", "fps", "resolution", "confidence", "flipHorizontal"}
+    ALLOWED_KEYS = {"cameraMode", "fps", "resolution", "confidence", "flipHorizontal",
+                    "inferenceMode"}
     try:
         body = await request.json()
     except Exception:
@@ -355,6 +365,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     camera = Camera()
     session_conf: float = 0.4
+    # Server-camera inference toggle. True (default) = "live" mode: run inference on every
+    # frame. False = "snapshot/preview" mode: stream raw camera frames (smooth, no
+    # inference) and only run a full-res reading when a "capture_now" arrives.
+    server_infer: bool = True
     last_infer: float = 0.0  # monotonic timestamp of the last processed frame
     # Per-session inference-rate cap (see docs/STREAM_PERFORMANCE.md, Option B).
     # Starts from the env default; the client's "Max FPS" slider overrides it live via
@@ -403,6 +417,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     msg = json.loads(data["text"])
 
                     if msg.get("action") == "start_server_stream":
+                        # "preview": true → snapshot mode (raw frames, no per-frame
+                        # inference). Default false → live inference.
+                        server_infer = not bool(msg.get("preview", False))
                         if not camera.is_running:
                             resolution = msg.get("resolution", "640x480")
                             source = msg.get("source", 0)
@@ -440,6 +457,30 @@ async def websocket_endpoint(websocket: WebSocket):
                         except (TypeError, ValueError):
                             logger.warning("Invalid fps value: %s", msg.get("value"))
 
+                    elif msg.get("action") == "capture_now":
+                        # Aim & Capture (server camera): one FULL-RESOLUTION reading from
+                        # the current camera frame. Runs regardless of the FPS throttle.
+                        if camera.is_running:
+                            frame = camera.get_frame()
+                            if frame is not None:
+                                ok, enc = cv2.imencode(".jpg", frame)
+                                if ok:
+                                    dets, cnt, ann = inference.run_inference_with_count(
+                                        enc.tobytes(), conf=session_conf, scale_factor=1.0
+                                    )
+                                    await websocket.send_json({
+                                        "mode": "server",
+                                        "capture": True,
+                                        "detections": dets,
+                                        "total_tubes": cnt,
+                                        **_compute_mpn(dets, cnt),
+                                        "image": base64.b64encode(ann).decode("utf-8"),
+                                    })
+                        else:
+                            await websocket.send_json(
+                                {"mode": "server", "error": "Camera not running"}
+                            )
+
             except asyncio.TimeoutError:
                 # ---------------------------------------------------------
                 # SERVER MODE
@@ -461,6 +502,17 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 success, encoded_img = cv2.imencode(".jpg", frame)
                 if not success:
+                    continue
+
+                # Snapshot/preview mode: stream the raw camera frame (no inference) so
+                # the operator can aim smoothly. The reading runs on "capture_now".
+                if not server_infer:
+                    await websocket.send_json({
+                        "mode": "server",
+                        "preview": True,
+                        "image": base64.b64encode(encoded_img.tobytes()).decode("utf-8"),
+                    })
+                    await asyncio.sleep(0.03)
                     continue
 
                 image_bytes = encoded_img.tobytes()
