@@ -22,7 +22,14 @@ edges, so the end tubes blend into the rig. Since `total_tubes != 9`, no MPN is 
 - Added [FIXED_ROI_DESIGN.md](docs/FIXED_ROI_DESIGN.md): on the jig the rack is in a fixed
   position, so instead of *detecting* tubes we crop the **9 known ROIs** and classify each
   — making "can't find a low-contrast edge tube" structurally impossible and always
-  yielding 9 tubes → MPN. Implementation to follow on this branch.
+  yielding 9 tubes → MPN.
+
+**Implemented (this branch):** `inference.run_inference_fixed_roi()` (crop-and-classify)
+and `detect_rois_normalized()` (calibration seed); `POST /calibrate`; `/predict` and WS
+`capture_now` route through the ROI pipeline when `roiMode` is calibrated (else full-frame
+fallback); Settings gains a Fixed-ROI group + a drag-to-adjust calibration modal. ROI
+applies to the capture/reading path in v1; Live preview stays full-frame. Verified locally
+in Docker (NCNN): `/calibrate` → 9 ROIs; `/predict` via ROI → 9 tubes, P330, MPN 240.
 
 ---
 
