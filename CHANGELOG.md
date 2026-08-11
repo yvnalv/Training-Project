@@ -5,6 +5,27 @@ Each entry includes the date, what changed, the problem it solved, and how it wa
 
 ---
 
+## [2026-08-11] Fixed-ROI jig mode — design + the two deployment use cases (docs)
+**Branch:** `feature/fixed-roi-jig`
+
+**Problem:** on a phone capture of a full 9-tube rack the model detected only 7 tubes —
+the two **end tubes** were missed. Cause: barrel/"fisheye" lens distortion, an off-axis
+angle, and low contrast (clear tubes on a **white** rig) — all three peak at the frame
+edges, so the end tubes blend into the rig. Since `total_tubes != 9`, no MPN is produced.
+
+**Fix (docs, this commit):**
+- Documented the lens-distortion / edge-blend problem and its fixes in
+  [ACCURACY_IMPROVEMENT.md](docs/ACCURACY_IMPROVEMENT.md).
+- Documented the **two genuinely different deployment use cases** — the controlled
+  **Pi + fixed jig** appliance (primary, reliable) vs **wild phones on the VPS**
+  (best-effort) — and why one config can't serve both.
+- Added [FIXED_ROI_DESIGN.md](docs/FIXED_ROI_DESIGN.md): on the jig the rack is in a fixed
+  position, so instead of *detecting* tubes we crop the **9 known ROIs** and classify each
+  — making "can't find a low-contrast edge tube" structurally impossible and always
+  yielding 9 tubes → MPN. Implementation to follow on this branch.
+
+---
+
 ## [2026-08-07] Stream performance — commit NCNN model + throttle live stream
 **Branch:** `stream-perf-ncnn-throttling`
 
