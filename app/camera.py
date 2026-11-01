@@ -9,10 +9,26 @@ import numpy as np
 
 try:
     Picamera2 = importlib.import_module("picamera2").Picamera2
-except Exception:
+    _PICAM_IMPORT_ERROR = None
+except Exception as _e:
     Picamera2 = None
+    _PICAM_IMPORT_ERROR = _e
 
 logger = logging.getLogger(__name__)
+
+# libcamera numeric control constants (avoid hard dependency on libcamera.controls enum)
+_AF_MODE_MANUAL = 0
+_AF_MODE_AUTO = 1
+_AF_MODE_CONTINUOUS = 2
+
+_AF_RANGE_NORMAL = 0
+_AF_RANGE_MACRO = 1
+_AF_RANGE_FULL = 2
+
+_AF_SPEED_NORMAL = 0
+_AF_SPEED_FAST = 1
+
+_AF_TRIGGER_START = 0
 
 
 class Camera:
@@ -21,12 +37,17 @@ class Camera:
         self.is_running = False
         self._latest_frame = None
         self._frame_lock = Lock()      # FIX: protects latest_frame across threads
+        self._picam_lock = Lock()      # serialises capture_image() and autofocus_cycle()
         self._thread = None
         self._backend = None
         self._picam = None
         self._picam_frame_is_rgb = False
         self._pi_hflip = True
         self._pi_vflip = True
+        self._focus_mode = "continuous"
+        self._lens_position = 5.2      # dioptres (~19 cm default rack distance; 1 / 0.19m)
+        self._supports_af = False
+        self._camera_model = None
 
     def _open_opencv_capture(self, source, width, height):
         numeric_source = source
@@ -67,21 +88,283 @@ class Camera:
 
         return None, None, None
 
-    def start(self, source=0, width=640, height=480):
+    def _select_full_fov_sensor_size(self, req_width: int, req_height: int):
+        """
+        Pick a sensor output size that reads the full sensor field-of-view (e.g. the
+        2304x1296 2x2 binned mode on IMX708 Camera Module 3, or 1640x1232 on IMX219)
+        instead of a center-cropped low-res mode (like 1536x864 on IMX708) where
+        ScalerCrop and PDAF phase pixels are restricted.
+        """
+        if self._picam is None:
+            return None
+        try:
+            full_res = self._picam.camera_properties.get("PixelArraySize")
+            modes = getattr(self._picam, "sensor_modes", None) or []
+            if not full_res or len(full_res) != 2 or not modes:
+                return None
+
+            full_w, full_h = full_res
+            full_fov_modes = []
+            for m in modes:
+                size = m.get("size")
+                crop = m.get("crop_limits")
+                fps = float(m.get("fps", 30.0))
+                if not size or len(size) != 2:
+                    continue
+                # Check if this mode covers >=95% of the physical pixel array
+                if crop and len(crop) == 4:
+                    if crop[2] < full_w * 0.95 or crop[3] < full_h * 0.95:
+                        continue
+                full_fov_modes.append((size[0], size[1], fps))
+
+            if not full_fov_modes:
+                return None
+
+            # Prefer the smallest full-FoV mode (usually 2x2 binned, e.g. 2304x1296 @ 56fps
+            # on IMX708) that is at least as large as the requested output and >=25 fps.
+            fast_modes = [
+                (w, h) for (w, h, fps) in full_fov_modes
+                if fps >= 25.0 and w >= req_width and h >= req_height
+            ]
+            if fast_modes:
+                fast_modes.sort(key=lambda s: s[0] * s[1])
+                return fast_modes[0]
+
+            # Fallback: smallest full-FoV mode overall (2x2 binned)
+            full_fov_modes.sort(key=lambda s: s[0] * s[1])
+            return (full_fov_modes[0][0], full_fov_modes[0][1])
+        except Exception as e:
+            logger.debug("Could not inspect sensor_modes for full FoV: %s", e)
+            return None
+
+    def set_focus(self, focus_mode: str = "continuous", lens_position: float | None = None) -> dict:
+        """
+        Configure autofocus or manual lens position on Picamera2 (Camera Module 3 / IMX708).
+
+        Args:
+            focus_mode:    "continuous" (default), "auto" (one-shot), or "manual".
+            lens_position: Focus distance in dioptres (1 / meters) when focus_mode == "manual".
+                           0.0 = infinity, ~5.2 = 19 cm, ~8.0 = 12.5 cm.
+
+        Returns:
+            dict with applied focus state for logging / API responses.
+        """
+        mode = str(focus_mode or "continuous").strip().lower()
+        if mode not in ("continuous", "auto", "manual"):
+            mode = "continuous"
+        self._focus_mode = mode
+
+        if lens_position is not None:
+            try:
+                self._lens_position = max(0.0, min(15.0, float(lens_position)))
+            except (TypeError, ValueError):
+                pass
+
+        if self._backend != "picamera2" or self._picam is None:
+            return {"supported": False, "mode": self._focus_mode, "reason": "not_picamera2"}
+
+        controls_map = getattr(self._picam, "camera_controls", {}) or {}
+        if "AfMode" not in controls_map:
+            self._supports_af = False
+            logger.warning(
+                "Camera sensor '%s' does not expose AfMode (fixed-focus module such as "
+                "CM1/CM2/HQ). Physical lens rotation is required for close-range focus.",
+                self._camera_model or "unknown",
+            )
+            return {
+                "supported": False,
+                "mode": "fixed",
+                "camera_model": self._camera_model,
+            }
+
+        self._supports_af = True
+
+        try:
+            if self._focus_mode == "manual":
+                ctrl = {"AfMode": _AF_MODE_MANUAL}
+                if "LensPosition" in controls_map:
+                    ctrl["LensPosition"] = float(self._lens_position)
+                self._picam.set_controls(ctrl)
+                logger.info(
+                    "Manual focus enabled (LensPosition=%.2f dioptres, ~%.0f cm).",
+                    self._lens_position,
+                    (100.0 / self._lens_position) if self._lens_position > 0 else 999.0,
+                )
+            else:
+                # Continuous AF with Full range (macro + normal) and Fast speed so the
+                # Camera Module 3 focuses reliably at close rack distances (~10-25 cm).
+                ctrl = {"AfMode": _AF_MODE_CONTINUOUS}
+                if "AfRange" in controls_map:
+                    ctrl["AfRange"] = _AF_RANGE_FULL
+                if "AfSpeed" in controls_map:
+                    ctrl["AfSpeed"] = _AF_SPEED_FAST
+                try:
+                    self._picam.set_controls(ctrl)
+                except Exception:
+                    # Fallback if driver rejects AfRange/AfSpeed combination
+                    self._picam.set_controls({"AfMode": _AF_MODE_CONTINUOUS})
+                logger.info(
+                    "Continuous autofocus enabled (AfRange=Full, AfSpeed=Fast) on '%s'.",
+                    self._camera_model or "Picamera2",
+                )
+            return {
+                "supported": True,
+                "mode": self._focus_mode,
+                "lens_position": self._lens_position,
+                "camera_model": self._camera_model,
+            }
+        except Exception as e:
+            logger.warning("Failed to set focus controls (%s): %s", self._focus_mode, e)
+            return {"supported": True, "mode": self._focus_mode, "error": str(e)}
+
+    def trigger_autofocus(self) -> dict:
+        """
+        Run an explicit autofocus cycle on Picamera2 and wait for the lens to lock.
+        If the camera is in manual focus mode, re-applies the manual LensPosition.
+        After locking in continuous mode, restores Continuous AF so live tracking continues.
+        """
+        if self._backend != "picamera2" or self._picam is None:
+            return {"focused": False, "supported": False, "reason": "not_picamera2"}
+
+        controls_map = getattr(self._picam, "camera_controls", {}) or {}
+        if "AfMode" not in controls_map:
+            return {
+                "focused": False,
+                "supported": False,
+                "camera_model": self._camera_model,
+                "reason": "fixed_focus_sensor",
+            }
+
+        if self._focus_mode == "manual":
+            res = self.set_focus("manual", self._lens_position)
+            return {"focused": True, **res}
+
+        focused = False
+        lens_pos = None
+        af_state = None
+
+        with self._picam_lock:
+            try:
+                # Ensure Full range (macro-capable) before running the AF sweep
+                pre_ctrl = {}
+                if "AfRange" in controls_map:
+                    pre_ctrl["AfRange"] = _AF_RANGE_FULL
+                if "AfSpeed" in controls_map:
+                    pre_ctrl["AfSpeed"] = _AF_SPEED_FAST
+                if pre_ctrl:
+                    try:
+                        self._picam.set_controls(pre_ctrl)
+                    except Exception:
+                        pass
+
+                if hasattr(self._picam, "autofocus_cycle"):
+                    focused = bool(self._picam.autofocus_cycle())
+                else:
+                    self._picam.set_controls({
+                        "AfMode": _AF_MODE_AUTO,
+                        "AfTrigger": _AF_TRIGGER_START,
+                    })
+                    time.sleep(0.8)
+                    focused = True
+
+                try:
+                    meta = self._picam.capture_metadata() or {}
+                    lens_pos = meta.get("LensPosition")
+                    af_state = meta.get("AfState")
+                except Exception:
+                    pass
+
+                logger.info(
+                    "Autofocus cycle completed: focused=%s, LensPosition=%s, AfState=%s",
+                    focused,
+                    f"{lens_pos:.2f}" if isinstance(lens_pos, (int, float)) else lens_pos,
+                    af_state,
+                )
+            except Exception as e:
+                logger.warning("Autofocus cycle failed: %s", e)
+            finally:
+                # Restore continuous autofocus if that is the active mode
+                if self._focus_mode == "continuous":
+                    try:
+                        restore_ctrl = {"AfMode": _AF_MODE_CONTINUOUS}
+                        if "AfRange" in controls_map:
+                            restore_ctrl["AfRange"] = _AF_RANGE_FULL
+                        if "AfSpeed" in controls_map:
+                            restore_ctrl["AfSpeed"] = _AF_SPEED_FAST
+                        self._picam.set_controls(restore_ctrl)
+                    except Exception:
+                        try:
+                            self._picam.set_controls({"AfMode": _AF_MODE_CONTINUOUS})
+                        except Exception:
+                            pass
+
+        return {
+            "focused": focused,
+            "supported": True,
+            "mode": self._focus_mode,
+            "lens_position": lens_pos,
+            "af_state": af_state,
+            "camera_model": self._camera_model,
+        }
+
+    def start(
+        self,
+        source=0,
+        width=640,
+        height=480,
+        focus_mode: str = "continuous",
+        lens_position: float | None = None,
+    ):
         if self.is_running:
             return
+
+        if source in (0, "0", "pi", "picam") and Picamera2 is None and sys.platform.startswith("linux"):
+            logger.warning(
+                "picamera2 is not importable (%s); falling back to OpenCV V4L2 which "
+                "cannot control Raspberry Pi autofocus/ISP. Recreate the venv with: "
+                "python3 -m venv --system-site-packages <venv>",
+                _PICAM_IMPORT_ERROR,
+            )
 
         if source in (0, "0", "pi", "picam") and Picamera2 is not None:
             try:
                 self._picam = Picamera2()
+                self._camera_model = self._picam.camera_properties.get("Model", "unknown")
+                logger.info("Opening Picamera2 (sensor model: %s)", self._camera_model)
+
                 # Always request RGB888 — it is universally supported by all
                 # Pi camera modules and libcamera versions.  BGR888 is
                 # hardware-dependent and on some configurations delivers data
                 # in RGB byte order despite the name, causing blue↔red swaps.
                 self._picam_frame_is_rgb = True
-                config = self._picam.create_video_configuration(
-                    main={"size": (width, height), "format": "RGB888"}
-                )
+
+                # FIX: Pick a full-FoV sensor mode (e.g. 2304x1296 2x2 binned on IMX708
+                # Camera Module 3) when requesting a smaller output like 640x480 or
+                # 1280x720. Otherwise libcamera selects the 1536x864 center-cropped mode
+                # where both field-of-view and PDAF autofocus phase pixels are restricted.
+                sensor_size = self._select_full_fov_sensor_size(width, height)
+                config = None
+                if sensor_size:
+                    try:
+                        config = self._picam.create_video_configuration(
+                            main={"size": (width, height), "format": "RGB888"},
+                            sensor={"output_size": sensor_size},
+                        )
+                        logger.info(
+                            "Picamera2 configured with full-FoV sensor mode %dx%d -> main %dx%d.",
+                            sensor_size[0],
+                            sensor_size[1],
+                            width,
+                            height,
+                        )
+                    except Exception as _cfg_err:
+                        logger.debug("sensor output_size config fallback: %s", _cfg_err)
+                        config = None
+
+                if config is None:
+                    config = self._picam.create_video_configuration(
+                        main={"size": (width, height), "format": "RGB888"}
+                    )
 
                 self._picam.configure(config)
                 self._picam.start()
@@ -102,27 +385,29 @@ class Camera:
                 # ── Sharpness: raise above the 1.0 default to compensate for
                 #    the close capture distance and any sensor softness.
                 try:
-                    self._picam.set_controls({"Sharpness": 4.0})
-                except Exception:
-                    pass
-
-                # ── Autofocus (Camera Module 3 only): continuous AF keeps the
-                #    image in focus at close range.  CM1/CM2 have fixed focus
-                #    so this control is silently ignored on those modules.
-                try:
-                    self._picam.set_controls({"AfMode": 2})  # 2 = Continuous
-                    logger.info("Continuous autofocus enabled.")
-                except Exception:
-                    pass
+                    self._picam.set_controls({"Sharpness": 2.5})
+                except Exception as _e:
+                    logger.debug("Sharpness not applied: %s", _e)
 
                 self._backend = "picamera2"
+
+                # ── Autofocus / Manual focus (Camera Module 3 / IMX708):
+                #    Apply focus mode and run an initial autofocus_cycle() before
+                #    starting the capture thread so the lens locks onto the close-range
+                #    rack immediately instead of staying blurry at infinity.
+                self.set_focus(focus_mode=focus_mode, lens_position=lens_position)
+                if self._supports_af and self._focus_mode != "manual":
+                    self.trigger_autofocus()
+
                 self.is_running = True
                 self._thread = Thread(target=self._capture_loop, daemon=True)
                 self._thread.start()
                 logger.info(
-                    "Camera started with Picamera2 (%dx%d, format=RGB888).",
+                    "Camera started with Picamera2 (%dx%d, sensor=%s, focus=%s).",
                     width,
                     height,
+                    self._camera_model,
+                    self._focus_mode if self._supports_af else "fixed",
                 )
                 return
             except Exception as e:
@@ -134,6 +419,7 @@ class Camera:
                     pass
                 self._picam = None
                 self._picam_frame_is_rgb = False
+                self._backend = None
 
         self.cap, opened_source, opened_backend = self._open_opencv_capture(
             source, width, height
@@ -172,7 +458,10 @@ class Camera:
                     # capture_image() returns a PIL Image in standard RGB —
                     # it is format-agnostic and works correctly on every Pi
                     # camera module regardless of libcamera format quirks.
-                    pil_frame = self._picam.capture_image("main")
+                    with self._picam_lock:
+                        if self._picam is None or not self.is_running:
+                            break
+                        pil_frame = self._picam.capture_image("main")
                     # Ensure RGB mode (handles rare RGBA output)
                     if pil_frame.mode != "RGB":
                         pil_frame = pil_frame.convert("RGB")
@@ -188,6 +477,7 @@ class Camera:
 
                     with self._frame_lock:
                         self._latest_frame = frame
+                    time.sleep(0.01)
                 except Exception:
                     time.sleep(0.05)
                 continue

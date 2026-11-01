@@ -56,7 +56,7 @@ _STREAM_MIN_INTERVAL = 1.0 / _STREAM_MAX_FPS if _STREAM_MAX_FPS > 0 else 0.0
 
 
 # ---------------------------------------------------------------------------
-# Helper: MPN calculation
+# Helper: MPN calculation & camera settings
 # ---------------------------------------------------------------------------
 
 def _active_rois():
@@ -86,6 +86,42 @@ def _active_rois():
         if not (isinstance(b, (list, tuple)) and len(b) == 4):
             return None
     return boxes
+
+
+def _focus_settings() -> tuple[str, float]:
+    """
+    Return saved (focus_mode, lens_position) from the settings table.
+    Defaults to ("continuous", 5.2) where 5.2 dioptres corresponds to ~19 cm.
+    """
+    try:
+        s = get_all_settings()
+    except Exception:
+        s = {}
+    mode = str(s.get("focusMode", "continuous")).strip().lower()
+    if mode not in ("continuous", "auto", "manual"):
+        mode = "continuous"
+    try:
+        lens_pos = float(s.get("lensPosition", 5.2))
+    except (TypeError, ValueError):
+        lens_pos = 5.2
+    return mode, max(0.0, min(15.0, lens_pos))
+
+
+def _still_capture_resolution() -> tuple[int, int]:
+    """
+    Return (width, height) for a single still capture (`GET /capture`).
+    Uses at least 1280x720 so still captures are sharp (avoiding the old 640x480 blur),
+    or a higher resolution if configured in Settings (e.g. 1920x1080).
+    """
+    try:
+        s = get_all_settings()
+        res_str = str(s.get("resolution", "1280x720"))
+        w, h = map(int, res_str.split("x"))
+    except Exception:
+        w, h = 1280, 720
+    if w < 1280 or h < 720:
+        return 1280, 720
+    return w, h
 
 
 def _compute_mpn(detections: list, total_count: int) -> dict:
@@ -137,7 +173,7 @@ async def health():
 async def predict(
     file: UploadFile,
     conf: float = Form(default=0.4),
-    full: bool = Form(default=False),   # True = full-res (Aim & Capture); else 50% downscale
+    full: bool = Form(default=True),   # FIX: default True so single captures aren't downscaled 50%
 ):
     image_bytes = await file.read()
 
@@ -363,6 +399,8 @@ async def put_settings_endpoint(request: Request):
     """
     ALLOWED_KEYS = {"cameraMode", "fps", "resolution", "confidence", "flipHorizontal",
                     "inferenceMode",
+                    # Camera focus controls (Pi Camera Module 3 autofocus / manual focus)
+                    "focusMode", "lensPosition",
                     # Fixed-ROI (jig) mode — see docs/FIXED_ROI_DESIGN.md
                     "roiMode", "roiBoxes", "roiCalibratedAt"}
     try:
@@ -388,7 +426,15 @@ async def capture_frame():
     """
     cam = Camera()
     try:
-        cam.start(source=0, width=640, height=480)
+        width, height = _still_capture_resolution()
+        focus_mode, lens_position = _focus_settings()
+        cam.start(
+            source=0,
+            width=width,
+            height=height,
+            focus_mode=focus_mode,
+            lens_position=lens_position,
+        )
 
         # Phase 1 — wait up to 3 s for the capture thread to produce any frame
         frame = None
@@ -404,11 +450,13 @@ async def capture_frame():
                 content={"error": "Camera not ready — no frame captured within timeout."},
             )
 
-        # Phase 2 — let the camera fully stabilise: autofocus locks on the
-        # subject, auto-exposure finds the right level, and any initial
-        # colour-balance transients settle.  2 s is enough for CM2/CM3.
-        await asyncio.sleep(2.0)
-        frame = cam.get_frame()  # grab the now-stable frame
+        # Phase 2 — let auto-exposure and white balance settle, then run an explicit
+        # autofocus lock (on autofocus-capable Pi cameras) right before snapping the frame.
+        await asyncio.sleep(1.2)
+        if focus_mode != "manual":
+            await asyncio.to_thread(cam.trigger_autofocus)
+            await asyncio.sleep(0.25)
+        frame = cam.get_frame()  # grab the now-focused, exposure-stable frame
 
         # Convert BGR (OpenCV) → RGB (PIL) and encode as JPEG with PIL.
         # Using PIL end-to-end avoids any BGR/RGB confusion that can occur
@@ -495,6 +543,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         if not camera.is_running:
                             resolution = msg.get("resolution", "640x480")
                             source = msg.get("source", 0)
+                            saved_focus_mode, saved_lens_pos = _focus_settings()
+                            focus_mode = msg.get("focusMode", saved_focus_mode)
+                            lens_pos = msg.get("lensPosition", saved_lens_pos)
                             try:
                                 width, height = map(int, resolution.split("x"))
                             except ValueError:
@@ -505,7 +556,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             if isinstance(source, str) and source.isdigit():
                                 source = int(source)
                             try:
-                                camera.start(source, width=width, height=height)
+                                camera.start(
+                                    source,
+                                    width=width,
+                                    height=height,
+                                    focus_mode=focus_mode,
+                                    lens_position=lens_pos,
+                                )
                             except Exception as e:
                                 logger.exception("Failed to start server camera.")
                                 await websocket.send_json({"mode": "server", "error": str(e)})
@@ -529,31 +586,50 @@ async def websocket_endpoint(websocket: WebSocket):
                         except (TypeError, ValueError):
                             logger.warning("Invalid fps value: %s", msg.get("value"))
 
+                    elif msg.get("action") == "set_focus":
+                        focus_mode = msg.get("focusMode", "continuous")
+                        lens_pos = msg.get("lensPosition")
+                        if camera.is_running:
+                            res = await asyncio.to_thread(
+                                camera.set_focus, focus_mode, lens_pos
+                            )
+                            await websocket.send_json({"mode": "server", "focus": res})
+
+                    elif msg.get("action") == "trigger_autofocus":
+                        if camera.is_running:
+                            res = await asyncio.to_thread(camera.trigger_autofocus)
+                            await websocket.send_json({"mode": "server", "autofocus": res})
+
                     elif msg.get("action") == "capture_now":
                         # Aim & Capture (server camera): one FULL-RESOLUTION reading from
                         # the current camera frame. Runs regardless of the FPS throttle.
                         if camera.is_running:
+                            await asyncio.to_thread(camera.trigger_autofocus)
+                            await asyncio.sleep(0.15)
                             frame = camera.get_frame()
                             if frame is not None:
-                                ok, enc = cv2.imencode(".jpg", frame)
-                                if ok:
-                                    rois = _active_rois()
-                                    if rois:
-                                        dets, cnt, ann = inference.run_inference_fixed_roi(
-                                            enc.tobytes(), rois, conf=session_conf
-                                        )
-                                    else:
-                                        dets, cnt, ann = inference.run_inference_with_count(
-                                            enc.tobytes(), conf=session_conf, scale_factor=1.0
-                                        )
-                                    await websocket.send_json({
-                                        "mode": "server",
-                                        "capture": True,
-                                        "detections": dets,
-                                        "total_tubes": cnt,
-                                        **_compute_mpn(dets, cnt),
-                                        "image": base64.b64encode(ann).decode("utf-8"),
-                                    })
+                                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                                pil_img = _PIL_Image.fromarray(frame_rgb)
+                                buf = io.BytesIO()
+                                pil_img.save(buf, format="JPEG", quality=92)
+                                raw_bytes = buf.getvalue()
+                                rois = _active_rois()
+                                if rois:
+                                    dets, cnt, ann = inference.run_inference_fixed_roi(
+                                        raw_bytes, rois, conf=session_conf
+                                    )
+                                else:
+                                    dets, cnt, ann = inference.run_inference_with_count(
+                                        raw_bytes, conf=session_conf, scale_factor=1.0
+                                    )
+                                await websocket.send_json({
+                                    "mode": "server",
+                                    "capture": True,
+                                    "detections": dets,
+                                    "total_tubes": cnt,
+                                    **_compute_mpn(dets, cnt),
+                                    "image": base64.b64encode(ann).decode("utf-8"),
+                                })
                         else:
                             await websocket.send_json(
                                 {"mode": "server", "error": "Camera not running"}

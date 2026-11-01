@@ -166,6 +166,10 @@
           <button class="btn danger" id="stopBtn" onclick="stopCamera()" disabled>
             <i class="fa-solid fa-stop"></i> Stop
           </button>
+          <button class="btn" id="refocusBtn" onclick="triggerAutofocus()" disabled
+                  title="Trigger autofocus sweep on Pi Camera">
+            <i class="fa-solid fa-crosshairs"></i> Refocus
+          </button>
           <!-- Shown only in Aim & Capture mode -->
           <button class="btn primary" id="captureAnalyzeBtn" onclick="captureAnalyze()"
                   style="display:none;">
@@ -429,14 +433,29 @@
             <select id="resolutionSelect">
               <option value="320x240">Low (320×240) – Fast</option>
               <option value="640x480" selected>Medium (640×480) – Balanced</option>
-              <option value="1280x720">High (1280×720) – Slow</option>
+              <option value="1280x720">High (1280×720) – Sharp</option>
+              <option value="1920x1080">Full HD (1920×1080) – Sharpest</option>
             </select>
           </div>
         </div>
 
         <!-- Camera Correction -->
         <div class="settings-group">
-          <h3><i class="fa-solid fa-camera-rotate"></i> Camera Correction</h3>
+          <h3><i class="fa-solid fa-camera-rotate"></i> Camera &amp; Focus</h3>
+          <div class="setting-item">
+            <label>Focus Mode (Pi Camera)</label>
+            <select id="focusModeSelect" onchange="updateFocusMode(this.value)">
+              <option value="continuous" selected>Continuous Autofocus (Macro + Full Range)</option>
+              <option value="manual">Manual Focus (Fixed Distance / Jig)</option>
+            </select>
+            <small>Use Manual Focus if clear glass tubes cause autofocus to hunt onto the background.</small>
+          </div>
+          <div class="setting-item" id="lensPositionItem" style="display:none;">
+            <label>Manual Focus Distance — <span id="lensPositionValue">5.2 dpt (~19 cm)</span></label>
+            <input type="range" id="lensPositionRange" min="0.0" max="12.0" step="0.2" value="5.2"
+                   oninput="updateLensPosition(this.value)">
+            <small>0 dpt = ∞ · 5.2 dpt ≈ 19 cm · 6.5 dpt ≈ 15 cm · 8.0 dpt ≈ 12.5 cm</small>
+          </div>
           <div class="setting-item">
             <label>Rotation — <span id="currentRotation">0°</span></label>
             <div class="btn-group">

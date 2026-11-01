@@ -11,6 +11,8 @@ let state = {
     isStreaming: false,
     cameraMode: 'client', // 'client' | 'server'  — overridden by loadSettings()
     inferenceMode: 'live', // 'live' | 'snapshot' (Aim & Capture) — overridden by loadSettings()
+    focusMode: 'continuous', // 'continuous' | 'manual' — overridden by loadSettings()
+    lensPosition: 5.2,    // dioptres (~19 cm default rack distance) — overridden by loadSettings()
     roiMode: false,       // fixed-ROI (jig) mode on/off — overridden by loadSettings()
     roiBoxes: null        // saved 9 normalized [x1,y1,x2,y2] boxes, or null — see FIXED_ROI_DESIGN.md
 };
@@ -77,6 +79,56 @@ function updateConfDisplay(val) {
         ws.send(JSON.stringify({ action: "set_conf", value: state.confidence }));
     }
     saveSettings();
+}
+
+function _formatLensPosition(dpt) {
+    const v = parseFloat(dpt);
+    if (isNaN(v) || v <= 0) return '0.0 dpt (∞)';
+    const cm = Math.round(100 / v);
+    return `${v.toFixed(1)} dpt (~${cm} cm)`;
+}
+
+function updateFocusMode(val) {
+    state.focusMode = (val === 'manual') ? 'manual' : 'continuous';
+    const item = document.getElementById('lensPositionItem');
+    if (item) item.style.display = (state.focusMode === 'manual') ? '' : 'none';
+
+    if (state.isStreaming && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            action: "set_focus",
+            focusMode: state.focusMode,
+            lensPosition: state.lensPosition
+        }));
+    }
+    saveSettings();
+}
+
+function updateLensPosition(val) {
+    state.lensPosition = parseFloat(val);
+    const el = document.getElementById('lensPositionValue');
+    if (el) el.textContent = _formatLensPosition(state.lensPosition);
+
+    if (state.isStreaming && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            action: "set_focus",
+            focusMode: state.focusMode,
+            lensPosition: state.lensPosition
+        }));
+    }
+    saveSettings();
+}
+
+function triggerAutofocus() {
+    if (state.isStreaming && ws && ws.readyState === WebSocket.OPEN) {
+        const btn = document.getElementById('refocusBtn');
+        if (btn) btn.disabled = true;
+        ws.send(JSON.stringify({ action: "trigger_autofocus" }));
+        setTimeout(() => {
+            if (btn && state.isStreaming && state.cameraMode === 'server') {
+                btn.disabled = false;
+            }
+        }, 1200);
+    }
 }
 
 function setRotation(deg) {
@@ -310,6 +362,7 @@ async function _runPredict(blob) {
     const formData = new FormData();
     formData.append('file', blob, 'capture.jpg');
     formData.append('conf', state.confidence);
+    formData.append('full', 'true'); // FIX: keep full resolution on single captures (no 50% downscale)
 
     try {
         const response = await fetch('/predict', { method: 'POST', body: formData });
@@ -416,6 +469,11 @@ async function startCamera() {
             // the in-flight guard so the next tick can send a fresh frame.
             _frameInFlight = false;
 
+            // Ignore focus/autofocus control acknowledgement messages
+            if (data.focus || data.autofocus) {
+                return;
+            }
+
             if (data.error) {
                 if (state.cameraMode === 'server') {
                     const [width, height] = state.resolution.split('x').map(Number);
@@ -423,6 +481,8 @@ async function startCamera() {
                     state.cameraMode = 'client';
                     const sourceSelect = document.getElementById('cameraSourceSelect');
                     if (sourceSelect) sourceSelect.value = 'client';
+                    const refocusBtn = document.getElementById('refocusBtn');
+                    if (refocusBtn) refocusBtn.disabled = true;
                     startClientStream(width, height);
                     return;
                 }
@@ -461,6 +521,8 @@ async function startCamera() {
         state.isStreaming = true;
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
+        const refocusBtn = document.getElementById('refocusBtn');
+        if (refocusBtn) refocusBtn.disabled = (state.cameraMode !== 'server');
         document.getElementById('streamResult').style.display = 'block';
 
     } catch (err) {
@@ -515,6 +577,8 @@ function startServerStream(width, height, preview = false) {
             action: "start_server_stream",
             resolution: state.resolution,
             preview: !!preview,   // true = raw preview frames (Aim & Capture)
+            focusMode: state.focusMode,
+            lensPosition: state.lensPosition,
         }));
     }
 }
@@ -587,6 +651,8 @@ function stopCamera() {
 
     document.getElementById('startBtn').disabled = false;
     document.getElementById('stopBtn').disabled = true;
+    const refocusBtn = document.getElementById('refocusBtn');
+    if (refocusBtn) refocusBtn.disabled = true;
 }
 
 
@@ -1290,6 +1356,8 @@ function saveSettings() {
                     confidence:     state.confidence,
                     flipHorizontal: state.flipHorizontal,
                     inferenceMode:  state.inferenceMode,
+                    focusMode:      state.focusMode,
+                    lensPosition:   state.lensPosition,
                 }),
             });
         } catch (e) {
@@ -1347,6 +1415,25 @@ async function loadSettings() {
         state.inferenceMode = im;
         const imSel = document.getElementById('inferenceModeSelect');
         if (imSel) imSel.value = im;
+
+        // focusMode + lensPosition (Pi Camera Module 3 autofocus / manual focus)
+        const fm = (saved.focusMode === 'manual') ? 'manual' : 'continuous';
+        state.focusMode = fm;
+        const fmSel = document.getElementById('focusModeSelect');
+        if (fmSel) fmSel.value = fm;
+        const lpItem = document.getElementById('lensPositionItem');
+        if (lpItem) lpItem.style.display = (fm === 'manual') ? '' : 'none';
+
+        if (saved.lensPosition !== undefined) {
+            const lp = parseFloat(saved.lensPosition);
+            if (!isNaN(lp)) {
+                state.lensPosition = lp;
+                const lpRange = document.getElementById('lensPositionRange');
+                if (lpRange) lpRange.value = lp;
+                const lpVal = document.getElementById('lensPositionValue');
+                if (lpVal) lpVal.textContent = _formatLensPosition(lp);
+            }
+        }
 
         // inference backend badge (NCNN fast path vs PyTorch fallback)
         const beEl = document.getElementById('modelBackend');
